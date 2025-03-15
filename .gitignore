@@ -1,4 +1,4 @@
 nimcache/
 nimblecache/
 htmldocs/
-.h5
+*.h5
