@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from tensorflow.keras.models import load_model
+import tensorflow as tf
 import numpy as np
 import io
 from PIL import Image
@@ -14,10 +14,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load the trained model
+# Load the trained model from checkpoint
 try:
-    model = load_model("Lung_Model.h5")
-    logger.info("Model loaded successfully")
+    checkpoint_path = "Model/model-0020"  # Update this path
+    model = tf.keras.models.load_model(checkpoint_path)  # Load from checkpoint
+    logger.info("Model loaded successfully from checkpoint")
     
     # Print model input/output shapes for debugging
     model_summary = []
