@@ -47,7 +47,7 @@ By default, the API runs at **http://127.0.0.1:5000**
 ```sh
 cd LungCancerDetection
 npm install
-npm start web/expo start web
+npx expo start --web
 
 ---
 ## 🧪 Testing the API
