@@ -6,10 +6,11 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from pymongo import MongoClient
 import logging
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +35,8 @@ except Exception as e:
 
 db = client['lung_cancer_db']
 records_collection = db['patient_records']
+scans_collection = db['scans']
+patients_collection = db['patients']
 
 # Configure upload folder
 UPLOAD_FOLDER = 'uploads'
@@ -187,6 +190,95 @@ def get_patient_history(patient_id):
     except Exception as e:
         logger.error(f"Error in patient history endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    try:
+        # Get total number of scans
+        total_scans = records_collection.count_documents({})
+        
+        # Get number of detected cases (malignant)
+        detected_cases = records_collection.count_documents({"diagnosis": "Malignant"})
+        
+        # Get number of active patients (patients with scans in the last 30 days)
+        thirty_days_ago = datetime.now().isoformat()[:10]  # Get date part only
+        active_patients = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": thirty_days_ago}
+        }))
+        
+        # Calculate success rate (based on model confidence > 90%)
+        high_confidence_scans = records_collection.count_documents({"confidence": {"$gt": 0.9}})
+        success_rate = (high_confidence_scans / total_scans * 100) if total_scans > 0 else 0
+        
+        # Calculate trends
+        prev_thirty_days = (datetime.now() - timedelta(days=30)).isoformat()[:10]
+        prev_scans = records_collection.count_documents({
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago}
+        })
+        current_scans = records_collection.count_documents({
+            "timestamp": {"$gte": thirty_days_ago}
+        })
+        
+        scan_trend = calculate_trend(prev_scans, current_scans)
+        
+        prev_cases = records_collection.count_documents({
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago},
+            "diagnosis": "Malignant"
+        })
+        current_cases = records_collection.count_documents({
+            "timestamp": {"$gte": thirty_days_ago},
+            "diagnosis": "Malignant"
+        })
+        
+        cases_trend = calculate_trend(prev_cases, current_cases)
+        
+        prev_active = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago}
+        }))
+        current_active = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": thirty_days_ago}
+        }))
+        
+        patients_trend = calculate_trend(prev_active, current_active)
+        
+        stats = {
+            "total_scans": {
+                "value": total_scans,
+                "trend": scan_trend
+            },
+            "detected_cases": {
+                "value": detected_cases,
+                "trend": cases_trend
+            },
+            "success_rate": {
+                "value": round(success_rate, 1)
+            },
+            "active_patients": {
+                "value": current_active,
+                "trend": patients_trend
+            }
+        }
+        
+        logger.info(f"Stats calculated: {json.dumps(stats)}")
+        return jsonify(stats)
+        
+    except Exception as e:
+        logger.error(f"Error calculating stats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+def calculate_trend(prev_value, current_value):
+    """Calculate percentage change between two values"""
+    if prev_value == 0:
+        return {
+            "value": 0,
+            "isPositive": True
+        }
+    
+    change = ((current_value - prev_value) / prev_value) * 100
+    return {
+        "value": round(abs(change), 1),
+        "isPositive": change >= 0
+    }
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

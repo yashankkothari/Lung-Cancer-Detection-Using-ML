@@ -1,276 +1,297 @@
-import * as React from "react";
-import { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  SafeAreaView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  TextInput,
-  Image,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import axios from "axios";
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Platform } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { API_BASE_URL, ENDPOINTS } from '../constants/api';
 
 interface PatientRecord {
   patientId: string;
   timestamp: string;
   diagnosis: string;
   confidence: number;
-  imageUrl: string;
+  probabilities: {
+    normal: number;
+    benign: number;
+    malignant: number;
+  };
 }
 
 export default function History() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const [patientId, setPatientId] = useState(params.id?.toString() || '');
   const [records, setRecords] = useState<PatientRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchId, setSearchId] = useState("");
-  const [filteredRecords, setFilteredRecords] = useState<PatientRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [searched, setSearched] = useState(false);
 
   useEffect(() => {
-    fetchRecords();
-  }, []);
-
-  useEffect(() => {
-    if (searchId.trim()) {
-      const filtered = records.filter(record => 
-        record.patientId.toLowerCase().includes(searchId.toLowerCase())
-      );
-      setFilteredRecords(filtered);
-    } else {
-      setFilteredRecords(records);
+    if (params.id) {
+      handleSearch();
     }
-  }, [searchId, records]);
+  }, [params.id]);
 
-  const fetchRecords = async () => {
+  const handleSearch = async () => {
+    if (!patientId.trim()) {
+      setError('Please enter a patient ID');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSearched(true);
+
     try {
-      const response = await axios.get("http://192.168.0.175:5000/history");
+      const response = await axios.get(`${API_BASE_URL}${ENDPOINTS.HISTORY}/${patientId.trim()}`);
       setRecords(response.data);
-      setFilteredRecords(response.data);
-    } catch (error) {
-      console.error("Error fetching records:", error);
-      Alert.alert("Error", "Failed to fetch patient records");
+      if (response.data.length === 0) {
+        setError('No records found for this patient');
+      }
+    } catch (err) {
+      console.error('Error fetching patient history:', err);
+      setError('Failed to fetch patient records');
+      setRecords([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const formatDate = (timestamp: string) => {
+    return new Date(timestamp).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
   const getDiagnosisColor = (diagnosis: string) => {
     switch (diagnosis.toLowerCase()) {
-      case 'malignant':
-        return '#F44336';
-      case 'benign':
-        return '#FF9800';
       case 'normal':
-        return '#4CAF50';
+        return '#10b981';
+      case 'benign':
+        return '#f59e0b';
+      case 'malignant':
+        return '#ef4444';
       default:
-        return '#FFFFFF';
+        return '#6b7280';
     }
   };
 
-  const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
-  };
+  const renderRecord = ({ item }: { item: PatientRecord }) => (
+    <View style={styles.recordCard}>
+      <View style={styles.recordHeader}>
+        <Text style={styles.timestamp}>{formatDate(item.timestamp)}</Text>
+        <View style={[styles.diagnosisTag, { backgroundColor: getDiagnosisColor(item.diagnosis) }]}>
+          <Text style={styles.diagnosisText}>{item.diagnosis}</Text>
+        </View>
+      </View>
+      
+      <View style={styles.confidenceContainer}>
+        <Text style={styles.confidenceLabel}>Confidence:</Text>
+        <Text style={styles.confidenceValue}>{(item.confidence * 100).toFixed(1)}%</Text>
+      </View>
+
+      <View style={styles.probabilitiesContainer}>
+        <View style={styles.probabilityItem}>
+          <Text style={styles.probabilityLabel}>Normal</Text>
+          <Text style={styles.probabilityValue}>{(item.probabilities.normal * 100).toFixed(1)}%</Text>
+        </View>
+        <View style={styles.probabilityItem}>
+          <Text style={styles.probabilityLabel}>Benign</Text>
+          <Text style={styles.probabilityValue}>{(item.probabilities.benign * 100).toFixed(1)}%</Text>
+        </View>
+        <View style={styles.probabilityItem}>
+          <Text style={styles.probabilityLabel}>Malignant</Text>
+          <Text style={styles.probabilityValue}>{(item.probabilities.malignant * 100).toFixed(1)}%</Text>
+        </View>
+      </View>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <LinearGradient
-        colors={['#1a237e', '#0d47a1', '#1565c0']}
-        style={styles.gradient}
-      >
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          <View style={styles.container}>
-            <View style={styles.header}>
-              <Text style={styles.title}>Patient History</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search by Patient ID"
-                placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                value={searchId}
-                onChangeText={setSearchId}
-              />
-            </View>
+    <View style={styles.container}>
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter Patient ID"
+          value={patientId}
+          onChangeText={setPatientId}
+          onSubmitEditing={handleSearch}
+          placeholderTextColor="#64748b"
+        />
+        <TouchableOpacity onPress={handleSearch} style={styles.searchButton}>
+          <Text style={styles.searchButtonText}>Search</Text>
+        </TouchableOpacity>
+      </View>
 
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
-                <Text style={styles.loadingText}>Loading records...</Text>
-              </View>
-            ) : filteredRecords.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {searchId.trim() 
-                    ? "No records found for this Patient ID"
-                    : "No patient records available"}
-                </Text>
-              </View>
-            ) : (
-              filteredRecords.map((record, index) => (
-                <View key={index} style={styles.recordCard}>
-                  <View style={styles.recordHeader}>
-                    <Text style={styles.patientId}>Patient ID: {record.patientId}</Text>
-                    <Text style={styles.timestamp}>{formatDate(record.timestamp)}</Text>
-                  </View>
-                  
-                  <View style={styles.diagnosisContainer}>
-                    <Text style={styles.diagnosisLabel}>Diagnosis:</Text>
-                    <Text style={[styles.diagnosisValue, { color: getDiagnosisColor(record.diagnosis) }]}>
-                      {record.diagnosis}
-                    </Text>
-                  </View>
-
-                  <View style={styles.imageContainer}>
-                    <Text style={styles.imageLabel}>CT Scan Image:</Text>
-                    <Image
-                      source={{ uri: record.imageUrl }}
-                      style={styles.image}
-                      resizeMode="cover"
-                    />
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        </ScrollView>
-      </LinearGradient>
-    </SafeAreaView>
+      {loading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#6366f1" />
+          <Text style={styles.loadingText}>Loading patient records...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#dc2626" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : searched && records.length > 0 ? (
+        <FlatList
+          data={records}
+          renderItem={renderRecord}
+          keyExtractor={(item) => item.timestamp}
+          contentContainerStyle={styles.listContainer}
+        />
+      ) : searched ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="document-outline" size={48} color="#64748b" />
+          <Text style={styles.noRecordsText}>No records found</Text>
+        </View>
+      ) : (
+        <View style={styles.centerContainer}>
+          <Ionicons name="search-outline" size={48} color="#64748b" />
+          <Text style={styles.initialText}>Enter a patient ID to view their scan history</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#1a237e',
-  },
-  gradient: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
   container: {
     flex: 1,
-    padding: 20,
+    backgroundColor: '#f8fafc',
+    padding: 16,
   },
-  header: {
-    marginBottom: 20,
+  searchContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    marginBottom: 15,
-    textAlign: "center",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  searchInput: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 10,
-    padding: 15,
-    color: "#FFFFFF",
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-  },
-  loadingContainer: {
+  input: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+    height: 48,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#1e293b',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchButton: {
+    backgroundColor: '#6366f1',
+    height: 48,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 16,
-    color: "#FFFFFF",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: '#64748b',
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  emptyText: {
+  errorText: {
+    marginTop: 16,
     fontSize: 16,
-    color: "#FFFFFF",
-    textAlign: "center",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: '#dc2626',
+    textAlign: 'center',
+  },
+  noRecordsText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#64748b',
+    textAlign: 'center',
+  },
+  initialText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#64748b',
+    textAlign: 'center',
+  },
+  listContainer: {
+    paddingBottom: 16,
   },
   recordCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   recordHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  patientId: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   timestamp: {
     fontSize: 14,
-    color: "#E0E0E0",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: '#64748b',
   },
-  diagnosisContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 15,
+  diagnosisTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
   },
-  diagnosisLabel: {
-    fontSize: 16,
-    color: "#FFFFFF",
-    marginRight: 10,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  diagnosisText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
-  diagnosisValue: {
-    fontSize: 18,
-    fontWeight: "bold",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  confidenceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  imageContainer: {
-    marginTop: 15,
+  confidenceLabel: {
+    fontSize: 14,
+    color: '#64748b',
+    marginRight: 8,
   },
-  imageLabel: {
-    fontSize: 16,
-    color: "#FFFFFF",
-    marginBottom: 10,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  confidenceValue: {
+    fontSize: 14,
+    color: '#1e293b',
+    fontWeight: '600',
   },
-  image: {
-    width: "100%",
-    height: 200,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+  probabilitiesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    padding: 12,
+  },
+  probabilityItem: {
+    alignItems: 'center',
+  },
+  probabilityLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 4,
+  },
+  probabilityValue: {
+    fontSize: 14,
+    color: '#1e293b',
+    fontWeight: '600',
   },
 }); 

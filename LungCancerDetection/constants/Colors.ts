@@ -7,20 +7,25 @@ const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
 export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+  primary: '#6C2BD9',
+  secondary: '#FF4B81',
+  background: {
+    dark: '#1A1B25',
+    gradient: ['#1A1B25', '#2B1055']
   },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+  text: {
+    primary: '#FFFFFF',
+    secondary: '#B4B4C7',
+    accent: '#FF4B81'
   },
-};
+  button: {
+    primary: '#FF4B81',
+    secondary: 'rgba(255, 255, 255, 0.1)'
+  },
+  card: {
+    background: 'rgba(255, 255, 255, 0.05)',
+    border: 'rgba(255, 255, 255, 0.1)'
+  }
+} as const;
+
+export type ColorsType = typeof Colors;
