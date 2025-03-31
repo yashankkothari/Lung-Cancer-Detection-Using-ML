@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { API_BASE_URL, ENDPOINTS } from '../constants/api';
+import Footer from '../components/Footer';
 
 interface PatientRecord {
   patientId: string;
@@ -155,6 +156,7 @@ export default function History() {
           <Text style={styles.initialText}>Enter a patient ID to view their scan history</Text>
         </View>
       )}
+      <Footer />
     </View>
   );
 }

@@ -11,6 +11,7 @@ from pymongo import MongoClient
 import logging
 from dotenv import load_dotenv
 import json
+import cv2
 
 # Load environment variables
 load_dotenv()
@@ -52,20 +53,31 @@ interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
+# Log model details
+logger.info(f"Model Input Details: {input_details}")
+logger.info(f"Model Output Details: {output_details}")
+
 def preprocess_image(image):
-    """Preprocess the image for model input"""
+    """Preprocess the image for model input exactly as done during training"""
     try:
-        # Resize image to match model input size
-        image = image.resize((224, 224))
-        
-        # Convert to numpy array and normalize
+        # Convert PIL Image to OpenCV format (RGB to BGR)
         img_array = np.array(image)
+        img_array = img_array[:, :, ::-1]  # RGB to BGR
+        
+        # Resize to 224x224 as done in training
+        img_array = cv2.resize(img_array, (224, 224))
+        
+        # Convert to float32 and normalize to [0, 1]
         img_array = img_array.astype('float32') / 255.0
         
         # Add batch dimension
         img_array = np.expand_dims(img_array, axis=0)
         
+        logger.info(f"Preprocessed image shape: {img_array.shape}")
+        logger.info(f"Value range: min={np.min(img_array)}, max={np.max(img_array)}")
+        
         return img_array
+        
     except Exception as e:
         logger.error(f"Error preprocessing image: {str(e)}")
         raise
@@ -73,6 +85,10 @@ def preprocess_image(image):
 def predict_image(image):
     """Make prediction using the TFLite model"""
     try:
+        # Convert to RGB if not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
         # Preprocess the image
         processed_image = preprocess_image(image)
         
@@ -87,6 +103,7 @@ def predict_image(image):
         
         # Get probabilities for each class
         probabilities = output_data[0]
+        logger.info(f"Raw probabilities: {probabilities}")
         
         # Get predicted class
         predicted_class_idx = np.argmax(probabilities)
@@ -99,6 +116,8 @@ def predict_image(image):
             'benign': float(probabilities[1]),
             'malignant': float(probabilities[2])
         }
+        
+        logger.info(f"Prediction result: {predicted_class} with probabilities {prob_dict}")
         
         return {
             'predicted_class': predicted_class,
@@ -113,47 +132,46 @@ def predict_image(image):
 def predict():
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+            return jsonify({'error': 'No file uploaded'}), 400
         
         file = request.files['file']
-        patient_id = request.form.get('patientId')
-        
-        if not patient_id:
-            return jsonify({'error': 'No patient ID provided'}), 400
-        
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-        
-        # Read and process the image
-        image = Image.open(file.stream)
-        
-        # Make prediction
-        prediction_result = predict_image(image)
-        
-        # Save the image
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_filename = f"{timestamp}_{filename}"
-        image_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-        image.save(image_path)
-        
-        # Create record for MongoDB
-        record = {
-            'patientId': patient_id,
-            'timestamp': datetime.now().isoformat(),
-            'diagnosis': prediction_result['predicted_class'],
-            'confidence': prediction_result['confidence'],
-            'probabilities': prediction_result['probabilities'],
-            'imageUrl': f"/uploads/{unique_filename}"
-        }
-        
-        # Save to MongoDB
-        records_collection.insert_one(record)
-        
-        return jsonify(prediction_result)
-    
+
+        # Read the image file
+        try:
+            # Read the file into memory
+            file_bytes = file.read()
+            file_stream = io.BytesIO(file_bytes)
+            
+            # Open and verify the image
+            image = Image.open(file_stream)
+            image.verify()  # Verify it's a valid image
+            
+            # Reopen because verify() closes the file
+            file_stream.seek(0)
+            image = Image.open(file_stream)
+            
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+                
+            logger.info(f"Image opened successfully. Size: {image.size}, Mode: {image.mode}")
+            
+        except Exception as e:
+            logger.error(f"Failed to open image: {str(e)}")
+            return jsonify({'error': f'Invalid image file: {str(e)}'}), 400
+
+        # Get prediction
+        try:
+            prediction = predict_image(image)
+            logger.info(f"Prediction successful: {prediction}")
+            return jsonify(prediction)
+        except Exception as e:
+            logger.error(f"Prediction failed: {str(e)}")
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 500
+
     except Exception as e:
-        logger.error(f"Error in predict endpoint: {str(e)}")
+        app.logger.error(f"Error during prediction: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/history', methods=['GET'])
@@ -279,6 +297,90 @@ def calculate_trend(prev_value, current_value):
         "value": round(abs(change), 1),
         "isPositive": change >= 0
     }
+
+@app.route('/save-record', methods=['POST'])
+def save_record():
+    try:
+        logger.info("Received save record request")
+        logger.info(f"Files in request: {list(request.files.keys())}")
+        logger.info(f"Form data in request: {list(request.form.keys())}")
+        
+        # Check for required data
+        if 'file' not in request.files:
+            logger.error("No file in save request")
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            logger.error("Empty filename")
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+            
+        patient_id = request.form.get('patientId')
+        if not patient_id:
+            logger.error("No patient ID provided")
+            return jsonify({'success': False, 'error': 'No patient ID provided'}), 400
+            
+        prediction_data = request.form.get('prediction')
+        if not prediction_data:
+            logger.error("No prediction data provided")
+            return jsonify({'success': False, 'error': 'No prediction data provided'}), 400
+            
+        try:
+            prediction = json.loads(prediction_data)
+            logger.info(f"Parsed prediction data: {prediction}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid prediction data format: {e}")
+            return jsonify({'success': False, 'error': 'Invalid prediction data format'}), 400
+
+        # Save the image file
+        try:
+            if not os.path.exists('uploads'):
+                os.makedirs('uploads')
+                
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{patient_id}_{timestamp}.jpg"
+            filepath = os.path.join('uploads', filename)
+            file.save(filepath)
+            logger.info(f"Image saved to: {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save image file: {e}")
+            return jsonify({'success': False, 'error': 'Failed to save image file'}), 500
+        
+        # Create database record
+        try:
+            record = {
+                'patientId': patient_id,
+                'timestamp': datetime.now(),
+                'imagePath': filepath,
+                'diagnosis': prediction['predicted_class'],
+                'confidence': prediction['confidence'],
+                'probabilities': prediction['probabilities']
+            }
+            
+            # Save to MongoDB
+            result = db.scans.insert_one(record)
+            logger.info(f"Record saved to MongoDB with ID: {result.inserted_id}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Record saved successfully',
+                'recordId': str(result.inserted_id)
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to save to MongoDB: {e}")
+            # Try to delete the saved image if database save fails
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({'success': False, 'error': 'Failed to save record to database'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error in save_record endpoint: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -7,25 +7,53 @@ const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
 export const Colors = {
-  primary: '#6C2BD9',
-  secondary: '#FF4B81',
-  background: {
-    dark: '#1A1B25',
-    gradient: ['#1A1B25', '#2B1055']
-  },
+  // Base colors
+  background: '#000000',
+  surface: '#0A0A0A',
+  card: '#141414',
+  
+  // Text colors
   text: {
     primary: '#FFFFFF',
-    secondary: '#B4B4C7',
-    accent: '#FF4B81'
+    secondary: '#999999',
+    muted: '#666666',
   },
-  button: {
-    primary: '#FF4B81',
-    secondary: 'rgba(255, 255, 255, 0.1)'
+  
+  // Accent colors (from the Ghost Hand Kit)
+  accent: {
+    blue: '#00E5FF',    // Cyan neon
+    purple: '#B14EFF',  // Purple neon
+    pink: '#FF1F71',    // Pink neon
+    green: '#00FF94',   // Green neon
+    orange: '#FF8A00',  // Orange neon
   },
-  card: {
-    background: 'rgba(255, 255, 255, 0.05)',
-    border: 'rgba(255, 255, 255, 0.1)'
+  
+  // Border colors
+  border: {
+    default: '#333333',
+    active: '#00E5FF',  // Using the cyan neon as active state
+  },
+  
+  // Status colors
+  status: {
+    success: '#00FF94',  // Green neon
+    warning: '#FF8A00',  // Orange neon
+    error: '#FF1F71',    // Pink neon
+    info: '#00E5FF',     // Cyan neon
+  },
+  
+  // Gradient colors
+  gradient: {
+    start: '#000000',
+    middle: '#0A0A0A',
+    end: '#141414',
+  },
+  
+  // Overlay colors
+  overlay: {
+    light: 'rgba(255, 255, 255, 0.1)',
+    dark: 'rgba(0, 0, 0, 0.7)',
   }
-} as const;
+};
 
 export type ColorsType = typeof Colors;

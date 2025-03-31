@@ -17,6 +17,10 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import axios from "axios";
 import { LinearGradient } from "expo-linear-gradient";
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Colors } from '../constants/Colors';
+import { useRouter } from "expo-router";
+import Footer from '../components/Footer';
 
 // Define interfaces based on the actual response formats
 interface WebDocumentResult {
@@ -51,9 +55,14 @@ type ImageState = {
 
 const { width } = Dimensions.get("window");
 
-export default function Scan() {
-  const [image, setImage] = useState<ImageState>(null);
+export default function ScanScreen() {
+  const [image, setImage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [patientId, setPatientId] = useState("");
+  const [selectedFile, setSelectedFile] = useState<{ blob: Blob; fileType: string } | null>(null);
+  const patientIdInputRef = React.useRef<TextInput>(null);
   const [prediction, setPrediction] = useState<{
     predicted_class: string;
     confidence: number;
@@ -63,124 +72,194 @@ export default function Scan() {
       benign: number;
     };
   } | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [patientIdError, setPatientIdError] = useState(false);
+  const router = useRouter();
+
+  const validateAndPickImage = () => {
+    if (!patientId.trim()) {
+      setPatientIdError(true);
+      Alert.alert(
+        "Missing Patient ID",
+        "Please enter a patient ID before selecting an image.",
+        [{ text: "OK" }]
+      );
+      patientIdInputRef.current?.focus();
+      return false;
+    }
+    setPatientIdError(false);
+    return true;
+  };
 
   const pickImage = async () => {
-    console.log("Opening image picker...");
-    
-    if (Platform.OS === "web") {
-      try {
-        const result = await DocumentPicker.getDocumentAsync({ type: "image/*" }) as WebDocumentResult;
-        console.log("Document Picker Result:", result);
+    if (!validateAndPickImage()) return;
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      console.log('Image picker result:', result);
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const selectedAsset = result.assets[0];
+        setImage(selectedAsset.uri);
         
-        if (!result.canceled && result.assets && result.assets.length > 0) {
-          const asset = result.assets[0];
-          console.log("Selected asset:", asset);
-          
-          setImage({
-            uri: asset.uri,
-            name: asset.name,
-            type: asset.mimeType,
-            file: result.output?.[0]
-          });
-        }
-      } catch (error) {
-        console.error("Document picker error:", error);
-        Alert.alert("Error", "Failed to pick image");
-      }
-    } else {
-      try {
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [4, 3],
-          quality: 1,
-        }) as MobileImageResult;
-      
-        console.log("Image Picker Result:", result);
+        // Get the actual file data
+        const response = await fetch(selectedAsset.uri);
+        const blob = await response.blob();
         
-        if (!result.canceled && result.assets && result.assets.length > 0) {
-          const asset = result.assets[0];
-          setImage({
-            uri: asset.uri,
-            name: asset.fileName,
-            type: asset.type
-          });
-        }
-      } catch (error) {
-        console.error("Image picker error:", error);
-        Alert.alert("Error", "Failed to pick image");
+        // Save the blob for later processing
+        const fileType = selectedAsset.uri.split('.').pop() || 'jpg';
+        setSelectedFile({ blob, fileType });
       }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
     }
   };
 
-  const uploadImage = async () => {
-    if (!image) {
-      Alert.alert("Error", "Please select an image first");
-      return;
-    }
-
-    if (!patientId.trim()) {
-      Alert.alert("Error", "Please enter a patient ID");
-      return;
-    }
-
-    setLoading(true);
-    const formData = new FormData();
-    
+  const handleUpload = async (blob: Blob, asset: any) => {
     try {
-      if (Platform.OS === "web" && image.file) {
-        formData.append("file", image.file);
-      } else if (Platform.OS === "web" && image.uri) {
-        const dataUriParts = image.uri.match(/^data:(.*?);base64,(.*)$/);
-        if (dataUriParts) {
-          const [, mimeType, base64Data] = dataUriParts;
-          const byteString = atob(base64Data);
-          const ab = new ArrayBuffer(byteString.length);
-          const ia = new Uint8Array(ab);
-          
-          for (let i = 0; i < byteString.length; i++) {
-            ia[i] = byteString.charCodeAt(i);
-          }
-          
-          const blob = new Blob([ab], { type: mimeType });
-          formData.append("file", blob, image.name || "image.jpg");
-        }
-      } else {
-        formData.append("file", {
-          uri: image.uri,
-          name: image.name || "image.jpg",
-          type: image.type || "image/jpeg",
-        } as any);
-      }
+      setIsLoading(true);
 
-      formData.append("patientId", patientId);
-
-      const res = await axios.post("http://192.168.0.175:5000/predict", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // Create form data
+      const formData = new FormData();
       
-      setPrediction(res.data);
+      // Get file extension and type
+      const uriParts = asset.uri.split('.');
+      const fileType = uriParts[uriParts.length - 1] || 'jpg';
+      
+      // Save the blob and fileType for later use when saving to database
+      setSelectedFile({ blob, fileType });
+      
+      // Append the file blob with the correct filename and type
+      formData.append('file', blob, `scan.${fileType}`);
+
+      console.log('Uploading image:', {
+        filename: `scan.${fileType}`,
+        type: `image/${fileType}`,
+        size: blob.size
+      });
+
+      // Make the request for prediction only
+      const response = await axios.post('http://localhost:5000/predict', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Accept': 'application/json',
+        },
+        transformRequest: (data) => {
+          return data;
+        },
+        timeout: 30000,
+      });
+
+      console.log('Server response:', response.data);
+
+      if (response.data) {
+        setPrediction(response.data);
+      } else {
+        throw new Error('No data received from server');
+      }
       
     } catch (error: any) {
-      console.error("Upload error:", error);
-      if (error.response) {
-        console.error("Error data:", error.response.data);
-        Alert.alert("Error", "Failed to process image");
-        setPrediction(null);
+      console.error('Upload error:', error);
+      console.error('Error details:', error.response?.data);
+      
+      let errorMessage = 'Failed to upload image. ';
+      if (error.response?.status === 400) {
+        errorMessage += error.response.data.error || 'Please ensure the image is a valid CT scan.';
+      } else if (error.response?.status === 500) {
+        errorMessage += error.response.data.error || 'Server error occurred.';
+      } else if (error.code === 'ECONNABORTED') {
+        errorMessage += 'Request timed out.';
       } else {
-        Alert.alert("Error", "Failed to connect to server");
-        setPrediction(null);
+        errorMessage += error.message || 'Please try again.';
       }
+      
+      Alert.alert("Error", errorMessage);
+      setPrediction(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveToDatabase = async () => {
+    if (!selectedFile || !prediction || !patientId) {
+      Alert.alert(
+        "Missing Information",
+        "Please ensure you have selected an image, processed it, and entered a patient ID.",
+        [{ text: "OK" }]
+      );
+      return;
     }
 
-    setLoading(false);
+    try {
+      setIsSaving(true);
+
+      const formData = new FormData();
+      formData.append('file', selectedFile.blob, `scan.${selectedFile.fileType}`);
+      formData.append('patientId', patientId);
+      formData.append('prediction', JSON.stringify(prediction));
+
+      const response = await axios.post('http://localhost:5000/save-record', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      setIsSaving(false);
+
+      // Force the Alert to show after state updates
+      requestAnimationFrame(() => {
+        Alert.alert(
+          "Success",
+          `Record saved successfully!\n\nPatient ID: ${patientId}\nDiagnosis: ${prediction.predicted_class}\nConfidence: ${(prediction.confidence * 100).toFixed(1)}%`,
+          [
+            {
+              text: "View History",
+              onPress: () => router.push('/history'),
+              style: "default"
+            },
+            {
+              text: "New Scan",
+              onPress: () => {
+                setImage(null);
+                setPrediction(null);
+                setSelectedFile(null);
+                setPatientId("");
+              },
+              style: "default"
+            },
+            {
+              text: "Close",
+              style: "cancel"
+            }
+          ]
+        );
+      });
+      
+    } catch (error: any) {
+      setIsSaving(false);
+      console.error('Save error:', error);
+      
+      // Force the error Alert to show after state updates
+      requestAnimationFrame(() => {
+        Alert.alert(
+          "Error Saving Record", 
+          "Failed to save record to database. Please try again.",
+          [{ text: "OK" }]
+        );
+      });
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient
-        colors={['#1a237e', '#0d47a1', '#1565c0']}
+        colors={[Colors.gradient.start, Colors.gradient.middle, Colors.gradient.end]}
         style={styles.gradient}
       >
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -189,62 +268,139 @@ export default function Scan() {
               <Text style={styles.cardTitle}>Patient Information</Text>
               
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Patient ID</Text>
+                <Text style={styles.inputLabel}>
+                  Patient ID <Text style={styles.requiredStar}>*</Text>
+                </Text>
                 <TextInput
-                  style={styles.input}
+                  ref={patientIdInputRef}
+                  style={[
+                    styles.input,
+                    patientIdError && styles.inputError
+                  ]}
                   value={patientId}
-                  onChangeText={setPatientId}
+                  onChangeText={(text) => {
+                    setPatientId(text);
+                    if (text.trim()) {
+                      setPatientIdError(false);
+                    }
+                  }}
                   placeholder="Enter patient ID"
-                  placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                  placeholderTextColor={Colors.text.muted}
                 />
+                {patientIdError && (
+                  <Text style={styles.errorText}>
+                    Patient ID is required
+                  </Text>
+                )}
               </View>
 
-              <TouchableOpacity
-                style={styles.uploadButton}
-                onPress={pickImage}
-              >
-                <Text style={styles.buttonText}>Select CT Scan Image</Text>
-              </TouchableOpacity>
-              
-              {image && image.uri && (
-                <View style={styles.imageContainer}>
-                  <Text style={styles.imageLabel}>
-                    {image.name || 'Selected Image'}
-                  </Text>
-                  
-                  <Image 
-                    source={{ uri: image.uri }} 
-                    style={styles.image} 
-                    onError={(e) => console.error("Image loading error:", e.nativeEvent)}
-                  />
-                  
+              <View style={styles.content}>
+                <Text style={styles.title}>Upload CT Scan Image</Text>
+                <Text style={styles.subtitle}>
+                  Our AI system will analyze your CT scan and provide results within seconds
+                </Text>
+
+                {!image ? (
                   <TouchableOpacity 
-                    style={[styles.actionButton, !image && styles.disabledButton]}
-                    onPress={uploadImage} 
-                    disabled={!image || loading}
+                    style={[
+                      styles.uploadArea, 
+                      isDragging && styles.uploadAreaActive,
+                      patientIdError && styles.uploadAreaDisabled
+                    ]}
+                    onPress={pickImage}
                   >
-                    <Text style={styles.actionButtonText}>
-                      {loading ? "Processing..." : "Analyze Image"}
-                    </Text>
+                    <View style={styles.uploadContent}>
+                      <MaterialCommunityIcons 
+                        name="cloud-upload-outline" 
+                        size={48} 
+                        color={Colors.accent.blue}
+                      />
+                      <Text style={styles.uploadText}>
+                        Drag and drop your CT scan image here, or
+                      </Text>
+                      <TouchableOpacity 
+                        style={styles.browseButton}
+                        onPress={pickImage}
+                      >
+                        <Text style={styles.browseButtonText}>Browse Files</Text>
+                      </TouchableOpacity>
+                    </View>
                   </TouchableOpacity>
-                </View>
-              )}
-              
-              {loading && (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#FFFFFF" />
-                  <Text style={styles.loadingText}>Analyzing image...</Text>
-                </View>
-              )}
+                ) : (
+                  <View style={styles.imagePreviewContainer}>
+                    <Image 
+                      source={{ uri: image }} 
+                      style={styles.imagePreview} 
+                      resizeMode="contain"
+                    />
+                    <View style={styles.imagePreviewActions}>
+                      <TouchableOpacity 
+                        style={styles.previewButton}
+                        onPress={() => {
+                          setImage(null);
+                          setPrediction(null);
+                          setSelectedFile(null);
+                        }}
+                      >
+                        <MaterialCommunityIcons 
+                          name="close" 
+                          size={24} 
+                          color={Colors.status.error}
+                        />
+                        <Text style={[styles.previewButtonText, { color: Colors.status.error }]}>
+                          Remove
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={styles.previewButton}
+                        onPress={pickImage}
+                      >
+                        <MaterialCommunityIcons 
+                          name="image-plus" 
+                          size={24} 
+                          color={Colors.accent.blue}
+                        />
+                        <Text style={[styles.previewButtonText, { color: Colors.accent.blue }]}>
+                          Change Image
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!prediction && selectedFile && (
+                      <TouchableOpacity
+                        style={[styles.processButton, isLoading && styles.processButtonDisabled]}
+                        onPress={() => handleUpload(selectedFile.blob, { uri: image })}
+                        disabled={isLoading}
+                      >
+                        <View style={styles.processButtonContent}>
+                          <MaterialCommunityIcons 
+                            name="brain" 
+                            size={24} 
+                            color={Colors.text.primary} 
+                          />
+                          <Text style={styles.processButtonText}>
+                            {isLoading ? 'Processing...' : 'Process Image'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
             </View>
+            
+            {isLoading && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={Colors.accent.blue} />
+                <Text style={styles.loadingText}>Processing image...</Text>
+              </View>
+            )}
             
             {prediction && (
               <View style={[styles.resultCard, { 
-                borderColor: prediction.predicted_class === 'Malignant' ? '#F44336' : 
-                            prediction.predicted_class === 'Benign' ? '#FF9800' : '#4CAF50',
-                backgroundColor: prediction.predicted_class === 'Malignant' ? 'rgba(244, 67, 54, 0.1)' :
-                              prediction.predicted_class === 'Benign' ? 'rgba(255, 152, 0, 0.1)' :
-                              'rgba(76, 175, 80, 0.1)'
+                borderColor: prediction.predicted_class === 'Malignant' ? Colors.status.error : 
+                            prediction.predicted_class === 'Benign' ? Colors.status.warning : 
+                            Colors.status.success,
+                backgroundColor: Colors.card
               }]}>
                 <Text style={styles.resultTitle}>Analysis Results</Text>
                 
@@ -252,20 +408,40 @@ export default function Scan() {
                   <View style={styles.resultItem}>
                     <Text style={styles.resultLabel}>Diagnosis:</Text>
                     <Text style={[styles.resultValue, { 
-                      color: prediction.predicted_class === 'Malignant' ? '#F44336' : 
-                             prediction.predicted_class === 'Benign' ? '#FF9800' : '#4CAF50',
-                      fontSize: 20,
-                      fontWeight: 'bold'
+                      color: prediction.predicted_class === 'Malignant' ? Colors.status.error : 
+                             prediction.predicted_class === 'Benign' ? Colors.status.warning : 
+                             Colors.status.success
                     }]}>{prediction.predicted_class}</Text>
                   </View>
                   
                   <Text style={styles.resultDisclaimer}>
                     This is an AI-assisted analysis and should not replace professional medical advice.
                   </Text>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.saveButton,
+                      isSaving && styles.saveButtonDisabled
+                    ]}
+                    onPress={handleSaveToDatabase}
+                    disabled={isSaving}
+                  >
+                    <View style={styles.saveButtonContent}>
+                      <MaterialCommunityIcons 
+                        name="database-plus" 
+                        size={24} 
+                        color={Colors.text.primary} 
+                      />
+                      <Text style={styles.saveButtonText}>
+                        {isSaving ? 'Saving to Database...' : 'Save to Database'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
           </View>
+          <Footer />
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
@@ -275,7 +451,7 @@ export default function Scan() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#1a237e',
+    backgroundColor: Colors.background,
   },
   gradient: {
     flex: 1,
@@ -293,139 +469,116 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   card: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: Colors.card,
     borderRadius: 20,
     padding: 25,
     marginBottom: 25,
     width: "100%",
     maxWidth: 600,
-    shadowColor: "#000",
+    shadowColor: Colors.background,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderColor: Colors.border.default,
   },
   cardTitle: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#FFFFFF",
+    color: Colors.text.primary,
     marginBottom: 20,
     textAlign: "center",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   inputContainer: {
     marginBottom: 20,
   },
   inputLabel: {
     fontSize: 16,
-    color: "#FFFFFF",
+    color: Colors.text.primary,
     marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   input: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: Colors.surface,
     borderRadius: 10,
     padding: 15,
-    color: "#FFFFFF",
+    color: Colors.text.primary,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
+    borderColor: Colors.border.default,
   },
-  uploadButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    borderRadius: 15,
+  content: {
+    flex: 1,
     padding: 20,
-    alignItems: "center",
-    marginBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: Colors.text.primary,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 40,
+    maxWidth: 600,
+  },
+  uploadArea: {
+    width: '100%',
+    aspectRatio: 16/9,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    borderStyle: "dashed",
+    borderColor: Colors.border.default,
+    borderStyle: 'dashed',
+    overflow: 'hidden',
   },
-  buttonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  uploadAreaActive: {
+    borderColor: Colors.border.active,
+    backgroundColor: Colors.overlay.light,
   },
-  imageContainer: { 
-    alignItems: "center",
-    marginTop: 20,
+  uploadAreaDisabled: {
+    opacity: 0.6,
+    borderColor: Colors.border.default,
   },
-  imageLabel: {
+  uploadContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  uploadText: {
+    color: Colors.text.secondary,
     fontSize: 16,
-    color: "#E0E0E0",
-    marginBottom: 15,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    marginTop: 12,
+    marginBottom: 12,
   },
-  image: { 
-    width: width > 500 ? 300 : width - 80, 
-    height: width > 500 ? 300 : width - 80, 
-    borderRadius: 20,
-    borderWidth: 3, 
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    backgroundColor: "#1a237e",
-    marginBottom: 25,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+  browseButton: {
+    backgroundColor: Colors.surface,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.border.default,
   },
-  actionButton: {
-    backgroundColor: "#2196F3",
-    borderRadius: 15,
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    alignItems: "center",
-    width: "100%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  disabledButton: {
-    backgroundColor: "rgba(33, 150, 243, 0.5)",
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  loadingContainer: {
-    marginTop: 20,
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: "#FFFFFF",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  browseButtonText: {
+    color: Colors.text.primary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   resultCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: Colors.card,
     borderRadius: 20,
     padding: 25,
     marginBottom: 25,
     borderLeftWidth: 8,
     width: "100%",
     maxWidth: 600,
-    shadowColor: "#000",
+    shadowColor: Colors.background,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -434,15 +587,12 @@ const styles = StyleSheet.create({
   resultTitle: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#FFFFFF",
+    color: Colors.text.primary,
     marginBottom: 20,
     textAlign: "center",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   resultContent: {
-    backgroundColor: "rgba(0, 0, 0, 0.1)",
+    backgroundColor: Colors.surface,
     borderRadius: 15,
     padding: 20,
   },
@@ -455,27 +605,127 @@ const styles = StyleSheet.create({
   resultValue: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#FFFFFF",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    color: Colors.text.primary,
   },
   resultDisclaimer: {
     fontSize: 14,
-    color: "#E0E0E0",
+    color: Colors.text.secondary,
     marginTop: 20,
     fontStyle: "italic",
     textAlign: "center",
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   resultLabel: {
     fontSize: 18,
-    color: "#FFFFFF",
+    color: Colors.text.primary,
     flex: 1,
-    textShadowColor: 'rgba(0, 0, 0, 0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  },
+  loadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.overlay.dark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingText: {
+    color: Colors.text.primary,
+    marginTop: 12,
+    fontSize: 16,
+  },
+  imagePreviewContainer: {
+    width: '100%',
+    aspectRatio: 16/9,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border.default,
+    overflow: 'hidden',
+    padding: 16,
+  },
+  imagePreview: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+  },
+  imagePreviewActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 16,
+  },
+  previewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.border.default,
+  },
+  previewButtonText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: Colors.accent.blue,
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 20,
+    width: '100%',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonText: {
+    color: Colors.text.primary,
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  inputError: {
+    borderColor: Colors.status.error,
+    borderWidth: 2,
+  },
+  errorText: {
+    color: Colors.status.error,
+    fontSize: 14,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  requiredStar: {
+    color: Colors.status.error,
+    fontSize: 16,
+  },
+  processButton: {
+    backgroundColor: Colors.accent.green,
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 16,
+    width: '100%',
+  },
+  processButtonDisabled: {
+    opacity: 0.6,
+  },
+  processButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  processButtonText: {
+    color: Colors.text.primary,
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 }); 

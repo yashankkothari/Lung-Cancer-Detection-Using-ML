@@ -1,300 +1,282 @@
-import React from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator, Platform } from 'react-native';
+import React, { useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView,
+  SafeAreaView,
+  Dimensions,
+  ImageBackground 
+} from 'react-native';
+import { Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, Link } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useStats } from '../hooks/useStats';
+import Footer from '../components/Footer';
 
-interface StatCardProps {
-  title: string;
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  trend?: {
-    value: number;
-    isPositive: boolean;
+export default function LandingPage() {
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const scrollToInfo = () => {
+    scrollViewRef.current?.scrollTo({ y: Dimensions.get('window').height, animated: true });
   };
-}
-
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, trend }) => (
-  <View style={styles.statCard}>
-    <View style={styles.statHeader}>
-      <View style={styles.iconContainer}>
-        <Ionicons name={icon} size={24} color="#fff" />
-      </View>
-      {trend && (
-        <View style={[styles.trendContainer, { backgroundColor: trend.isPositive ? '#1a8754' : '#dc3545' }]}>
-          <Ionicons 
-            name={trend.isPositive ? 'arrow-up-outline' : 'arrow-down-outline'} 
-            size={12} 
-            color="#fff" 
-          />
-          <Text style={styles.trendText}>{trend.value}%</Text>
-        </View>
-      )}
-    </View>
-    <Text style={styles.statValue}>{value}</Text>
-    <Text style={styles.statTitle}>{title}</Text>
-  </View>
-);
-
-export default function Home() {
-  const router = useRouter();
-  const { stats, loading, error } = useStats();
-
-  const handleNewScan = () => {
-    router.push('/scan');
-  };
-
-  const handleViewHistory = () => {
-    router.push('/history');
-  };
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6366f1" />
-        <Text style={styles.loadingText}>Loading statistics...</Text>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="warning-outline" size={48} color="#dc3545" />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity onPress={() => router.reload()} style={styles.retryButton}>
-          <Text style={styles.retryText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.welcomeText}>Welcome Back!</Text>
-        <Text style={styles.subtitle}>Here's your dashboard overview</Text>
+    <View style={styles.container}>
+      <ScrollView ref={scrollViewRef} style={styles.scrollView}>
+        <ImageBackground
+          source={require('../assets/lung-bg.png')}
+          style={styles.backgroundImage}
+          resizeMode="cover"
+        >
+          <LinearGradient
+            colors={['rgba(0,0,0,0.7)', 'rgba(0,0,0,0.85)']}
+            style={styles.background}
+          >
+            <View style={styles.mainContent}>
+              <Text style={styles.appName}>Oncolytix</Text>
+              <Text style={styles.title}>Lung Cancer{'\n'}Detection</Text>
+              <Text style={styles.subtitle}>
+                AI-Powered Early Detection Tool for Improved Diagnosis and Treatment Planning
+              </Text>
+              
+              <View style={styles.buttonContainer}>
+                <Link href="/scan" asChild>
+                  <TouchableOpacity style={styles.startButton}>
+                    <Text style={styles.buttonText}>Start Scan</Text>
+                  </TouchableOpacity>
+                </Link>
+                
+                <TouchableOpacity style={styles.learnButton} onPress={scrollToInfo}>
+                  <Text style={styles.learnButtonText}>Learn More</Text>
+                </TouchableOpacity>
+              </View>
 
-        <View style={styles.statsGrid}>
-          <StatCard
-            title="Total Scans"
-            value={String(stats?.total_scans.value || '0')}
-            icon="scan-outline"
-            trend={stats?.total_scans.trend}
-          />
-          <StatCard
-            title="Detected Cases"
-            value={String(stats?.detected_cases.value || '0')}
-            icon="medical-outline"
-            trend={stats?.detected_cases.trend}
-          />
-          <StatCard
-            title="Success Rate"
-            value={String(stats?.success_rate.value || '0')}
-            icon="checkmark-circle-outline"
-          />
-          <StatCard
-            title="Active Patients"
-            value={String(stats?.active_patients.value || '0')}
-            icon="people-outline"
-            trend={stats?.active_patients.trend}
-          />
-        </View>
+              <View style={styles.accuracyContainer}>
+                <View style={styles.checkmarkContainer}>
+                  <Text style={styles.checkmark}>✓</Text>
+                </View>
+                <Text style={styles.accuracyText}>91.2% accuracy in early detection</Text>
+              </View>
+            </View>
 
-        <View style={styles.actionCards}>
-          <TouchableOpacity onPress={handleNewScan} style={styles.actionCard}>
-            <LinearGradient
-              colors={['#6366f1', '#4f46e5']}
-              style={styles.actionGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <Ionicons name="add-circle-outline" size={32} color="#fff" />
-              <Text style={styles.actionTitle}>New Scan</Text>
-              <Text style={styles.actionSubtitle}>Upload CT scan images</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+            {/* Information Section */}
+            <View style={styles.infoSection}>
+              <Text style={[styles.sectionTitle, { color: '#fff' }]}>About Lung Cancer</Text>
+              <Text style={[styles.sectionDescription, { color: 'rgba(255,255,255,0.9)' }]}>
+                Lung cancer is one of the most common cancers worldwide, with over 2 million new cases diagnosed each year. Early detection is crucial for successful treatment.
+              </Text>
 
-          <TouchableOpacity onPress={handleViewHistory} style={styles.actionCard}>
-            <LinearGradient
-              colors={['#3b82f6', '#2563eb']}
-              style={styles.actionGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <Ionicons name="time-outline" size={32} color="#fff" />
-              <Text style={styles.actionTitle}>View History</Text>
-              <Text style={styles.actionSubtitle}>Check past scan results</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+              <View style={styles.infoGrid}>
+                {/* Warning Signs Card */}
+                <View style={styles.infoCard}>
+                  <Text style={styles.cardTitle}>Warning Signs</Text>
+                  <View style={styles.listContainer}>
+                    <Text style={styles.listItem}>• Persistent cough that doesn't go away</Text>
+                    <Text style={styles.listItem}>• Chest pain that worsens with deep breathing</Text>
+                    <Text style={styles.listItem}>• Hoarseness or change in voice</Text>
+                    <Text style={styles.listItem}>• Unexplained weight loss</Text>
+                    <Text style={styles.listItem}>• Shortness of breath</Text>
+                    <Text style={styles.listItem}>• Coughing up blood</Text>
+                  </View>
+                </View>
 
-        <View style={styles.tipsContainer}>
-          <Text style={styles.tipsTitle}>Quick Tips</Text>
-          <Text style={styles.tipText}>• Ensure CT scans are in DICOM or PNG format</Text>
-          <Text style={styles.tipText}>• Keep patient information up to date</Text>
-          <Text style={styles.tipText}>• Review scan history periodically</Text>
-        </View>
-      </View>
-    </ScrollView>
+                {/* Risk Factors Card */}
+                <View style={styles.infoCard}>
+                  <Text style={styles.cardTitle}>Risk Factors</Text>
+                  <View style={styles.listContainer}>
+                    <Text style={styles.listItem}>• Smoking (responsible for 80-90% of cases)</Text>
+                    <Text style={styles.listItem}>• Exposure to secondhand smoke</Text>
+                    <Text style={styles.listItem}>• Exposure to radon gas</Text>
+                    <Text style={styles.listItem}>• Family history of lung cancer</Text>
+                    <Text style={styles.listItem}>• Previous radiation therapy to the chest</Text>
+                    <Text style={styles.listItem}>• Exposure to asbestos, arsenic, or other carcinogens</Text>
+                  </View>
+                </View>
+
+                {/* Benefits Card */}
+                <View style={styles.infoCard}>
+                  <Text style={styles.cardTitle}>Benefits of Early Detection</Text>
+                  <View style={styles.listContainer}>
+                    <Text style={styles.listItem}>• Significantly higher survival rates</Text>
+                    <Text style={styles.listItem}>• Less invasive treatment options</Text>
+                    <Text style={styles.listItem}>• Reduced treatment complications</Text>
+                    <Text style={styles.listItem}>• Better quality of life during treatment</Text>
+                    <Text style={styles.listItem}>• More treatment choices available</Text>
+                    <Text style={styles.listItem}>• Lower overall healthcare costs</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* AI Detection Section */}
+              <View style={styles.aiSection}>
+                <Text style={styles.cardTitle}>How Our AI-Powered Detection Works</Text>
+                <Text style={styles.aiDescription}>
+                  Our advanced AI algorithm has been trained on over 1000 CT scan images to identify early signs of lung cancer with high accuracy. The system can detect nodules as small as 3mm and classify them based on malignancy risk.
+                </Text>
+              </View>
+            </View>
+
+            {/* Add Footer at the bottom */}
+            <Footer />
+          </LinearGradient>
+        </ImageBackground>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#000',
   },
-  content: {
-    padding: 16,
-    paddingTop: Platform.OS === 'ios' ? 120 : 100,
-  },
-  loadingContainer: {
+  scrollView: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#64748b',
+  backgroundImage: {
+    width: '100%',
+    minHeight: Dimensions.get('window').height,
   },
-  errorContainer: {
+  background: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    padding: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#dc3545',
+  mainContent: {
+    height: Dimensions.get('window').height,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  appName: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '600',
+    marginBottom: 16,
+    opacity: 0.9,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 48,
+    fontWeight: 'bold',
     textAlign: 'center',
+    marginBottom: 16,
   },
-  retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
+  subtitle: {
+    fontSize: 18,
+    color: '#fff',
+    textAlign: 'center',
+    maxWidth: 600,
+    marginBottom: 40,
+    opacity: 0.9,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 15,
+    marginBottom: 40,
+  },
+  startButton: {
+    backgroundColor: '#1a73e8',
     paddingVertical: 12,
-    backgroundColor: '#6366f1',
-    borderRadius: 8,
+    paddingHorizontal: 24,
+    borderRadius: 5,
   },
-  retryText: {
+  buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 8,
+  learnButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#fff',
   },
-  subtitle: {
+  learnButtonText: {
+    color: '#fff',
     fontSize: 16,
-    color: '#64748b',
-    marginBottom: 24,
+    fontWeight: '600',
   },
-  statsGrid: {
+  accuracyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: 10,
+    borderRadius: 8,
+  },
+  checkmarkContainer: {
+    backgroundColor: '#1a73e8',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  accuracyText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  infoSection: {
+    padding: 20,
+    paddingTop: 60,
+  },
+  sectionTitle: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  sectionDescription: {
+    fontSize: 16,
+    textAlign: 'center',
+    maxWidth: 800,
+    marginBottom: 40,
+    alignSelf: 'center',
+  },
+  infoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 40,
   },
-  statCard: {
-    width: (Dimensions.get('window').width - 48) / 2,
-    backgroundColor: '#fff',
+  infoCard: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: 24,
+    width: '100%',
+    maxWidth: 380,
   },
-  statHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  iconContainer: {
-    backgroundColor: '#6366f1',
-    borderRadius: 12,
-    padding: 8,
-  },
-  trendContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  trendText: {
-    color: '#fff',
-    fontSize: 12,
-    marginLeft: 4,
-  },
-  statValue: {
+  cardTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 4,
-  },
-  statTitle: {
-    fontSize: 14,
-    color: '#64748b',
-  },
-  actionCards: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  actionCard: {
-    width: (Dimensions.get('window').width - 48) / 2,
-    height: 160,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  actionGradient: {
-    flex: 1,
-    padding: 16,
-    justifyContent: 'space-between',
-  },
-  actionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
     color: '#fff',
-    marginTop: 16,
+    marginBottom: 16,
   },
-  actionSubtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.8,
+  listContainer: {
+    gap: 8,
   },
-  tipsContainer: {
-    backgroundColor: '#fff',
+  listItem: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 24,
+  },
+  aiSection: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: 24,
+    marginTop: 20,
   },
-  tipsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    marginBottom: 12,
-  },
-  tipText: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 8,
+  aiDescription: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 24,
   },
 }); 
