@@ -1,6 +1,7 @@
 flask==2.3.3
 flask-cors==4.0.0
-tensorflow==2.15.0
+tensorflow==2.16.1
+tflite-runtime==2.16.1
 pillow==10.2.0
 numpy==1.26.3
 pymongo==4.6.1

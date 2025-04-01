@@ -22,6 +22,7 @@
     "eventemitter3": "^5.0.1",
     "expo": "^52.0.0",
     "expo-blur": "~14.0.3",
+    "expo-cli": "^6.3.10",
     "expo-constants": "~17.0.8",
     "expo-document-picker": "~13.0.3",
     "expo-file-system": "~18.0.11",

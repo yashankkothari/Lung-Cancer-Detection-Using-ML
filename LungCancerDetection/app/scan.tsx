@@ -11,7 +11,8 @@ import {
   SafeAreaView,
   Dimensions,
   TextInput,
-  Alert
+  Alert,
+  Modal
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -73,6 +74,7 @@ export default function ScanScreen() {
     };
   } | null>(null);
   const [patientIdError, setPatientIdError] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const router = useRouter();
 
   const validateAndPickImage = () => {
@@ -210,49 +212,38 @@ export default function ScanScreen() {
         },
       });
 
-      setIsSaving(false);
-
-      // Force the Alert to show after state updates
-      requestAnimationFrame(() => {
-        Alert.alert(
-          "Success",
-          `Record saved successfully!\n\nPatient ID: ${patientId}\nDiagnosis: ${prediction.predicted_class}\nConfidence: ${(prediction.confidence * 100).toFixed(1)}%`,
-          [
-            {
-              text: "View History",
-              onPress: () => router.push('/history'),
-              style: "default"
-            },
-            {
-              text: "New Scan",
-              onPress: () => {
-                setImage(null);
-                setPrediction(null);
-                setSelectedFile(null);
-                setPatientId("");
-              },
-              style: "default"
-            },
-            {
-              text: "Close",
-              style: "cancel"
-            }
-          ]
-        );
-      });
+      // Show the custom success popup
+      setShowSuccessPopup(true);
+      
+      // Keep the isSaving state true until user dismisses the popup
       
     } catch (error: any) {
       setIsSaving(false);
       console.error('Save error:', error);
       
-      // Force the error Alert to show after state updates
-      requestAnimationFrame(() => {
-        Alert.alert(
-          "Error Saving Record", 
-          "Failed to save record to database. Please try again.",
-          [{ text: "OK" }]
-        );
+      Alert.alert(
+        "Error Saving Record", 
+        "Failed to save record to database. Please try again.",
+        [{ text: "OK" }]
+      );
+    }
+  };
+
+  // Function to handle popup actions
+  const handlePopupAction = (action: 'history' | 'new' | 'close') => {
+    setShowSuccessPopup(false);
+    setIsSaving(false);
+    
+    if (action === 'history') {
+      router.push({
+        pathname: '/history',
+        params: { id: patientId }
       });
+    } else if (action === 'new') {
+      setImage(null);
+      setPrediction(null);
+      setSelectedFile(null);
+      setPatientId("");
     }
   };
 
@@ -440,6 +431,79 @@ export default function ScanScreen() {
                 </View>
               </View>
             )}
+
+            {/* Success Popup */}
+            <Modal
+              visible={showSuccessPopup}
+              transparent={true}
+              animationType="fade"
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.popupContainer}>
+                  <View style={styles.popupHeader}>
+                    <MaterialCommunityIcons
+                      name="check-circle"
+                      size={48}
+                      color={Colors.status.success}
+                    />
+                    <Text style={styles.popupTitle}>Success</Text>
+                  </View>
+                  
+                  <View style={styles.popupContent}>
+                    <Text style={styles.popupMessage}>
+                      Record saved successfully!
+                    </Text>
+                    <View style={styles.popupDetails}>
+                      <Text style={styles.popupDetailText}>
+                        <Text style={styles.popupDetailLabel}>Patient ID: </Text>
+                        {patientId}
+                      </Text>
+                      <Text style={styles.popupDetailText}>
+                        <Text style={styles.popupDetailLabel}>Diagnosis: </Text>
+                        {prediction?.predicted_class}
+                      </Text>
+                      <Text style={styles.popupDetailText}>
+                        <Text style={styles.popupDetailLabel}>Confidence: </Text>
+                        {prediction ? `${(prediction.confidence * 100).toFixed(1)}%` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.popupActions}>
+                    <TouchableOpacity
+                      style={[styles.popupButton, styles.popupButtonPrimary]}
+                      onPress={() => handlePopupAction('history')}
+                    >
+                      <MaterialCommunityIcons
+                        name="history"
+                        size={20}
+                        color={Colors.background}
+                      />
+                      <Text style={styles.popupButtonTextPrimary}>View History</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.popupButton, styles.popupButtonSecondary]}
+                      onPress={() => handlePopupAction('new')}
+                    >
+                      <MaterialCommunityIcons
+                        name="image-plus"
+                        size={20}
+                        color={Colors.accent.blue}
+                      />
+                      <Text style={styles.popupButtonTextSecondary}>New Scan</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.popupButton, styles.popupButtonTertiary]}
+                      onPress={() => handlePopupAction('close')}
+                    >
+                      <Text style={styles.popupButtonTextTertiary}>Close</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
           </View>
           <Footer />
         </ScrollView>
@@ -727,5 +791,97 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  popupContainer: {
+    backgroundColor: Colors.card,
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 450,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  popupHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  popupTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.text.primary,
+    marginTop: 8,
+  },
+  popupContent: {
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  popupMessage: {
+    fontSize: 18,
+    color: Colors.text.primary,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  popupDetails: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 12,
+  },
+  popupDetailText: {
+    fontSize: 16,
+    color: Colors.text.primary,
+    marginBottom: 8,
+  },
+  popupDetailLabel: {
+    fontWeight: 'bold',
+  },
+  popupActions: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  popupButton: {
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  popupButtonPrimary: {
+    backgroundColor: Colors.accent.blue,
+  },
+  popupButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.accent.blue,
+  },
+  popupButtonTertiary: {
+    backgroundColor: 'transparent',
+  },
+  popupButtonTextPrimary: {
+    color: Colors.background,
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  popupButtonTextSecondary: {
+    color: Colors.accent.blue,
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  popupButtonTextTertiary: {
+    color: Colors.text.secondary,
+    fontSize: 16,
   },
 }); 

@@ -46,8 +46,14 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # Load the TFLite model
 model_path = os.path.join('Model', 'model.tflite')
-interpreter = tf.lite.Interpreter(model_path=model_path)
-interpreter.allocate_tensors()
+try:
+    # Load the TFLite model
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    logger.info("Successfully loaded TFLite model")
+except Exception as e:
+    logger.error(f"Failed to load TFLite model: {str(e)}")
+    raise
 
 # Get input and output tensors
 input_details = interpreter.get_input_details()
@@ -124,6 +130,7 @@ def predict_image(image):
             'confidence': float(probabilities[predicted_class_idx]),
             'probabilities': prob_dict
         }
+        
     except Exception as e:
         logger.error(f"Error making prediction: {str(e)}")
         raise

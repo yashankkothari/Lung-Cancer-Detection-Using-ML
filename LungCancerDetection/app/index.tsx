@@ -7,7 +7,7 @@ import {
   ScrollView,
   SafeAreaView,
   Dimensions,
-  ImageBackground 
+  ImageBackground,
 } from 'react-native';
 import { Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,13 +24,19 @@ export default function LandingPage() {
     <View style={styles.container}>
       <ScrollView ref={scrollViewRef} style={styles.scrollView}>
         <ImageBackground
-          source={require('../assets/lung-bg.png')}
-          style={styles.backgroundImage}
-          resizeMode="cover"
+          source={require('../assets/lung-illustration.png')}
+          style={[styles.backgroundImage]}
+          resizeMode="contain"
+          imageStyle={{ 
+            marginTop: -300,
+            width: '100%',
+            height: '100%',
+            opacity: 0.7
+          }}
         >
           <LinearGradient
-            colors={['rgba(0,0,0,0.7)', 'rgba(0,0,0,0.85)']}
-            style={styles.background}
+            colors={['rgba(26, 42, 108, 0.95)', 'rgba(42, 72, 88, 0.95)', 'rgba(0, 0, 0, 0.98)']}
+            style={[styles.background]}
           >
             <View style={styles.mainContent}>
               <Text style={styles.appName}>Oncolytix</Text>
@@ -43,6 +49,12 @@ export default function LandingPage() {
                 <Link href="/scan" asChild>
                   <TouchableOpacity style={styles.startButton}>
                     <Text style={styles.buttonText}>Start Scan</Text>
+                  </TouchableOpacity>
+                </Link>
+
+                <Link href="/history" asChild>
+                  <TouchableOpacity style={styles.recordsButton}>
+                    <Text style={styles.buttonText}>Check Patient Records</Text>
                   </TouchableOpacity>
                 </Link>
                 
@@ -114,10 +126,10 @@ export default function LandingPage() {
                   Our advanced AI algorithm has been trained on over 1000 CT scan images to identify early signs of lung cancer with high accuracy. The system can detect nodules as small as 3mm and classify them based on malignancy risk.
                 </Text>
               </View>
-            </View>
 
-            {/* Add Footer at the bottom */}
-            <Footer />
+              {/* Add Footer at the bottom */}
+              <Footer />
+            </View>
           </LinearGradient>
         </ImageBackground>
       </ScrollView>
@@ -139,7 +151,8 @@ const styles = StyleSheet.create({
   },
   background: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 20,
+    minHeight: Dimensions.get('window').height,
   },
   mainContent: {
     height: Dimensions.get('window').height,
@@ -171,19 +184,31 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 15,
     marginBottom: 40,
+    justifyContent: 'center',
+    maxWidth: 600,
   },
   startButton: {
     backgroundColor: '#1a73e8',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 5,
+    minWidth: 140,
+  },
+  recordsButton: {
+    backgroundColor: '#2a4858',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 5,
+    minWidth: 140,
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
   learnButton: {
     backgroundColor: 'transparent',
@@ -192,11 +217,13 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderWidth: 1,
     borderColor: '#fff',
+    minWidth: 140,
   },
   learnButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
   },
   accuracyContainer: {
     flexDirection: 'row',
