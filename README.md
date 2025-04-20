@@ -1,63 +1,154 @@
-# Lung Cancer Detection Using Machine Learning (React Native + Expo)
+# Lung Cancer Detection Using Machine Learning
 
-This project is a **React Native mobile application** using **Expo** to provide an interface for predicting lung cancer chances based on CT scan images. A **Flask API** runs in the backend to process the images using a **machine learning model**.
+A comprehensive application for early detection of lung cancer using machine learning and medical imaging. This project combines a React Native mobile app with a Flask backend to provide accurate predictions and detailed medical reports.
 
-## 🚀 Features
-- Upload **CT scan images** via mobile app
-- **Machine learning model** predicts lung cancer probability
-- **Interactive UI** with **React Native** & **Expo**
-- **Flask API** for backend processing
+## Features
 
----
-## 📦 Installation & Setup
+- **AI-Powered Analysis**: Upload CT scan images for instant analysis
+- **Detailed Medical Reports**: Get comprehensive reports with risk assessment
+- **Patient Management**: Store and track patient records
+- **Secure Authentication**: User authentication with JWT tokens
+- **Cross-Platform**: Works on both mobile and web platforms
 
-### 1️⃣ Clone the Repository
-```sh
-git clone https://github.com/yashankkothari/Lung-Cancer-Detection-Using-ML.git
-cd Lung-Cancer-Detection-Using-ML
+## Technology Stack
+
+### Frontend
+- React Native
+- Expo
+- TypeScript
+- Axios for API communication
+- AsyncStorage for local data persistence
+
+### Backend
+- Flask (Python)
+- TensorFlow/Keras for ML model
+- MongoDB for database
+- JWT for authentication
+- PIL for image processing
+
+## Project Structure
+
+```
+LungCancerDetection/
+├── app/                    # React Native frontend
+│   ├── (tabs)/             # Tab-based navigation
+│   ├── context/            # React context providers
+│   └── components/         # Reusable UI components
+├── backend/                # Flask backend
+│   ├── app.py              # Main Flask application
+│   ├── db.py               # Database connection
+│   └── .env                # Environment variables
+└── model/                  # ML model files
+    └── Lung_Model.h5       # Trained model
 ```
 
-### 2️⃣ Install Expo CLI (if not installed)
-```sh
-npm install -g expo-cli
-```
+## Setup Instructions
 
-### 3️⃣ Install Dependencies
-```sh
-cd LungCancerDetection 
-npm install
-```
+### Prerequisites
+- Node.js (v14 or higher)
+- Python (v3.8 or higher)
+- MongoDB
+- Expo CLI
+
+### Backend Setup
+1. Navigate to the backend directory:
+   ```
+   cd LungCancerDetection/backend
+   ```
+
+2. Create a virtual environment:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. Set up environment variables in `.env`:
+   ```
+   MONGO_URI=your_mongodb_connection_string
+   SECRET_KEY=your_jwt_secret_key
+   ```
+
+5. Start the Flask server:
+   ```
+   python app.py
+   ```
+
+### Frontend Setup
+1. Navigate to the project root:
+   ```
+   cd LungCancerDetection
+   ```
+
+2. Install dependencies:
+   ```
+   npm install
+   ```
+
+3. Start the Expo development server:
+   ```
+   npx expo start
+   ```
+
+## Usage
+
+1. **Authentication**
+   - Sign up with email and password
+   - Log in to access the application
+
+2. **Image Analysis**
+   - Enter patient details
+   - Upload a CT scan image
+   - Get instant analysis results
+
+3. **View Reports**
+   - Access detailed medical reports
+   - View patient history
+   - Track risk levels over time
+
+## API Endpoints
+
+- `POST /api/signup`: User registration
+- `POST /api/login`: User authentication
+- `POST /predict`: Image analysis
+- `GET /api/reports`: Get user reports
+- `GET /api/reports/<report_id>`: Get specific report
+
+## Security Features
+
+- JWT-based authentication
+- Password hashing
+- CORS protection
+- Input validation
+- Secure file handling
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Medical imaging dataset providers
+- Open-source ML libraries
+- React Native community
+- Flask framework
+
+## Support
+
+For support, please open an issue in the GitHub repository or contact the development team.
+
 ---
-## ⚙️ Setting Up the Model
-Since GitHub restricts files over **100MB**, you'll need to manually download the model file.
 
-### 📥 Download `Lung_Model.h5`
-1. Download it from https://drive.google.com/file/d/1334YgXUGplhYJMp-g1w8IrRoG8wTN92B/view?usp=sharing
-2. Move it to the project directory: `LungCancerDetection/Lung_Model.h5`
-
----
-## 🏃 Running the Application
-### 1️⃣ Start the Backend (Flask API)
-```sh
-python app.py
-```
-By default, the API runs at **http://127.0.0.1:5000**
-
-### 2️⃣ Start the Frontend (React App)
-```sh
-cd LungCancerDetection
-npm install
-npm start web/expo start web
-
----
-## 🧪 Testing the API
-You can test the API using **Postman** or **cURL**:
-```sh
-curl -X POST "http://127.0.0.1:5000/predict" -F "file=@sample_ct_scan.png"
-```
-
----
-## 📜 License
-This project is **open-source** under the MIT License.
-
-### 👨‍💻 Developed by Yashank Kothari
+**Note**: This application is for educational purposes only and should not be used as a substitute for professional medical advice.

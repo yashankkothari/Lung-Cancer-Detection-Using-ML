@@ -9,12 +9,18 @@ import {
   Platform, 
   ScrollView,
   SafeAreaView,
-  Dimensions
+  Dimensions,
+  TextInput,
+  Alert,
+  Modal,
+  FlatList
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import axios from "axios";
 import { LinearGradient } from "expo-linear-gradient";
+import { usePatient } from "../context/PatientContext";
+import { useAuth } from '../context/AuthContext';
 
 // Define interfaces based on the actual response formats
 interface WebDocumentResult {
@@ -55,6 +61,14 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [riskLevel, setRiskLevel] = useState<string>("");
   const [riskColor, setRiskColor] = useState<string>("#000");
+  const [patientName, setPatientName] = useState("");
+  const [patientAge, setPatientAge] = useState("");
+  const [patientGender, setPatientGender] = useState("");
+  const [report, setReport] = useState<any>(null);
+  const [showReport, setShowReport] = useState(false);
+  const { createRecord } = usePatient();
+  const { token } = useAuth();
+  const [reportId, setReportId] = useState<string | null>(null);
 
   const pickImage = async () => {
     console.log("Opening image picker...");
@@ -104,20 +118,53 @@ export default function App() {
     }
   };
 
+  const generateReport = async (predictionData: any) => {
+    try {
+      const response = await axios.post(
+        "http://localhost:5000/api/generate-report",
+        {
+          patient_name: patientName,
+          age: patientAge,
+          gender: patientGender,
+          prediction: predictionData.prediction,
+          probability: predictionData.probability,
+          risk_level: predictionData.risk_level
+        },
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      setReport(response.data.report);
+      setShowReport(true);
+    } catch (error) {
+      console.error("Error generating report:", error);
+      Alert.alert("Error", "Failed to generate report");
+    }
+  };
+
   const uploadImage = async () => {
     if (!image) return;
+    if (!patientName || !patientAge || !patientGender) {
+      Alert.alert('Error', 'Please fill in all patient details');
+      return;
+    }
+
+    if (!token) {
+      Alert.alert('Error', 'Please login to make predictions');
+      return;
+    }
 
     setLoading(true);
     const formData = new FormData();
     
     try {
       if (Platform.OS === "web" && image.file) {
-        // For web with file object available
         formData.append("file", image.file);
-        console.log("Web formData prepared with File object");
       } else if (Platform.OS === "web" && image.uri) {
-        // For web with base64 data URI
-        // Convert data URI to blob
         const dataUriParts = image.uri.match(/^data:(.*?);base64,(.*)$/);
         if (dataUriParts) {
           const [, mimeType, base64Data] = dataUriParts;
@@ -131,38 +178,66 @@ export default function App() {
           
           const blob = new Blob([ab], { type: mimeType });
           formData.append("file", blob, image.name || "image.jpg");
-          console.log("Web formData prepared from data URI");
         }
       } else {
-        // For mobile
         formData.append("file", {
           uri: image.uri,
           name: image.name || "image.jpg",
           type: image.type || "image/jpeg",
         } as any);
-        console.log("Mobile formData prepared");
       }
 
-      console.log("Sending request to backend...");
-      const res = await axios.post("http://192.168.0.175:5000/predict", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+      formData.append("patient_name", patientName);
+      formData.append("age", patientAge);
+      formData.append("gender", patientGender);
+
+      const res = await axios.post("http://localhost:5000/predict", formData, {
+        headers: { 
+          "Content-Type": "multipart/form-data",
+          "Authorization": `Bearer ${token}`
+        },
       });
       
-      console.log("Response received:", res.data);
       const probability = res.data.lung_cancer_probability;
-      setPrediction(`${(probability * 100).toFixed(2)}%`);
+      const predictionText = `${(probability * 100).toFixed(2)}%`;
+      setPrediction(predictionText);
       
-      // Set risk level based on probability
+      let riskLevelText = "";
       if (probability < 0.3) {
-        setRiskLevel("Low Risk");
+        riskLevelText = "Low Risk";
         setRiskColor("#4CAF50");
       } else if (probability < 0.7) {
-        setRiskLevel("Moderate Risk");
+        riskLevelText = "Moderate Risk";
         setRiskColor("#FF9800");
       } else {
-        setRiskLevel("High Risk");
+        riskLevelText = "High Risk";
         setRiskColor("#F44336");
       }
+      setRiskLevel(riskLevelText);
+
+      // Store the report ID for later use
+      setReportId(res.data.report_id);
+
+      await createRecord({
+        patient_name: patientName,
+        age: parseInt(patientAge),
+        gender: patientGender,
+        scan_date: new Date().toISOString(),
+        prediction: predictionText,
+        probability: probability,
+        risk_level: riskLevelText
+      });
+
+      const predictionData = {
+        prediction: predictionText,
+        probability: probability,
+        risk_level: riskLevelText
+      };
+
+      // Generate report after successful prediction
+      await generateReport(predictionData);
+
+      Alert.alert('Success', 'Analysis completed successfully');
       
     } catch (error: any) {
       console.error("Upload error:", error);
@@ -179,6 +254,81 @@ export default function App() {
     setLoading(false);
   };
 
+  const viewReport = async () => {
+    if (!reportId) {
+      Alert.alert('Error', 'No report available');
+      return;
+    }
+
+    try {
+      const response = await axios.get(`http://localhost:5000/api/reports/${reportId}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      setReport(response.data.report);
+      setShowReport(true);
+    } catch (error) {
+      console.error("Error fetching report:", error);
+      Alert.alert("Error", "Failed to fetch report");
+    }
+  };
+
+  const ReportModal = () => (
+    <Modal
+      visible={showReport}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowReport(false)}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.reportContainer}>
+          <View style={styles.reportHeader}>
+            <Text style={styles.reportTitle}>Medical Report</Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowReport(false)}
+            >
+              <Text style={styles.closeButtonText}>×</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.reportScrollView}>
+            <View style={styles.reportSection}>
+              <Text style={styles.sectionTitle}>Patient Information</Text>
+              <Text style={styles.reportText}>Name: {report?.patient_name}</Text>
+              <Text style={styles.reportText}>Age: {report?.age}</Text>
+              <Text style={styles.reportText}>Gender: {report?.gender}</Text>
+              <Text style={styles.reportText}>Scan Date: {report?.scan_date}</Text>
+            </View>
+
+            <View style={styles.reportSection}>
+              <Text style={styles.sectionTitle}>Diagnosis Results</Text>
+              <Text style={styles.reportText}>Prediction: {report?.prediction}</Text>
+              <Text style={styles.reportText}>Risk Level: {report?.risk_level}</Text>
+            </View>
+
+            <View style={styles.reportSection}>
+              <Text style={styles.sectionTitle}>Doctor's Notes</Text>
+              {report?.doctor_notes.map((note: string, index: number) => (
+                <Text key={index} style={styles.reportText}>• {note}</Text>
+              ))}
+            </View>
+
+            <View style={styles.reportSection}>
+              <Text style={styles.sectionTitle}>Recommendations</Text>
+              {report?.recommendations.map((rec: string, index: number) => (
+                <Text key={index} style={styles.reportText}>• {rec}</Text>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient
@@ -194,6 +344,39 @@ export default function App() {
             
             <View style={styles.cardContainer}>
               <View style={styles.card}>
+                <Text style={styles.cardTitle}>Patient Information</Text>
+                
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Patient Name"
+                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    value={patientName}
+                    onChangeText={setPatientName}
+                  />
+                </View>
+
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Age"
+                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    value={patientAge}
+                    onChangeText={setPatientAge}
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Gender"
+                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
+                    value={patientGender}
+                    onChangeText={setPatientGender}
+                  />
+                </View>
+
                 <Text style={styles.cardTitle}>Upload CT Scan Image</Text>
                 
                 <TouchableOpacity
@@ -253,50 +436,20 @@ export default function App() {
                     <Text style={styles.resultDisclaimer}>
                       This is an AI-assisted analysis and should not replace professional medical advice.
                     </Text>
+                    
+                    <TouchableOpacity
+                      style={styles.viewReportButton}
+                      onPress={viewReport}
+                    >
+                      <Text style={styles.viewReportButtonText}>View Detailed Report</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               )}
-              
-              <View style={styles.infoCard}>
-                <Text style={styles.infoTitle}>About Lung Cancer</Text>
-                
-                <Text style={styles.infoText}>
-                  Lung cancer is one of the most common cancers worldwide, with over 2 million new cases diagnosed each year. Early detection is crucial for successful treatment.
-                </Text>
-                
-                <Text style={styles.infoSubtitle}>Warning Signs:</Text>
-                <View style={styles.bulletList}>
-                  <Text style={styles.bulletItem}>• Persistent cough that doesn't go away</Text>
-                  <Text style={styles.bulletItem}>• Chest pain that worsens with deep breathing</Text>
-                  <Text style={styles.bulletItem}>• Hoarseness or change in voice</Text>
-                  <Text style={styles.bulletItem}>• Unexplained weight loss</Text>
-                  <Text style={styles.bulletItem}>• Shortness of breath</Text>
-                  <Text style={styles.bulletItem}>• Coughing up blood</Text>
-                </View>
-                
-                <Text style={styles.infoSubtitle}>Risk Factors:</Text>
-                <View style={styles.bulletList}>
-                  <Text style={styles.bulletItem}>• Smoking (responsible for 80-90% of cases)</Text>
-                  <Text style={styles.bulletItem}>• Exposure to secondhand smoke</Text>
-                  <Text style={styles.bulletItem}>• Exposure to radon gas</Text>
-                  <Text style={styles.bulletItem}>• Family history of lung cancer</Text>
-                  <Text style={styles.bulletItem}>• Exposure to asbestos and other carcinogens</Text>
-                </View>
-                
-                <Text style={styles.infoSubtitle}>Prevention:</Text>
-                <Text style={styles.infoText}>
-                  The best way to prevent lung cancer is to never smoke or to quit smoking. Regular screenings for high-risk individuals can help detect cancer early when it's most treatable.
-                </Text>
-              </View>
-            </View>
-            
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                This application is for educational purposes only. Always consult with a healthcare professional for medical advice.
-              </Text>
             </View>
           </View>
         </ScrollView>
+        <ReportModal />
       </LinearGradient>
     </SafeAreaView>
   );
@@ -326,12 +479,12 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "bold",
     color: "#FFFFFF",
-    textAlign: "center",
+    marginBottom: 10,
   },
   subtitle: {
     fontSize: 16,
-    color: "#E0E0E0",
-    marginTop: 5,
+    color: "#FFFFFF",
+    textAlign: "center",
   },
   cardContainer: {
     width: "100%",
@@ -356,7 +509,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   uploadButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "#3498db",
     borderRadius: 10,
     padding: 15,
     alignItems: "center",
@@ -453,55 +606,92 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     textAlign: "center",
   },
-  infoCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  infoTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    marginBottom: 15,
-  },
-  infoText: {
-    fontSize: 14,
-    color: "#E0E0E0",
-    marginBottom: 15,
-    lineHeight: 20,
-  },
-  infoSubtitle: {
+  resultLabel: {
     fontSize: 16,
-    fontWeight: "bold",
     color: "#FFFFFF",
-    marginBottom: 8,
+    fontWeight: "500",
   },
-  bulletList: {
+  inputContainer: {
     marginBottom: 15,
   },
-  bulletItem: {
-    fontSize: 14,
-    color: "#E0E0E0",
+  input: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 10,
+    padding: 15,
+    color: '#fff',
+    fontSize: 16,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  reportContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    width: '90%',
+    maxHeight: '80%',
+    padding: 20,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
+  },
+  reportTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 24,
+    color: '#2c3e50',
+    fontWeight: 'bold',
+  },
+  reportScrollView: {
+    maxHeight: '80%',
+  },
+  reportSection: {
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 10,
+  },
+  reportText: {
+    fontSize: 16,
+    color: '#333',
     marginBottom: 5,
-    lineHeight: 20,
+    lineHeight: 24,
   },
-  footer: {
-    width: "100%",
-    marginTop: 10,
-    paddingVertical: 15,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.1)",
+  viewReportButton: {
+    backgroundColor: '#3498db',
+    padding: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 20,
   },
-  footerText: {
-    fontSize: 12,
-    color: "#E0E0E0",
-    textAlign: "center",
-    fontStyle: "italic",
-  }
+  viewReportButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });
