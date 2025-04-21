@@ -1,330 +1,393 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
+import os
 import tensorflow as tf
 import numpy as np
-import io
 from PIL import Image
-import traceback
+import io
+from datetime import datetime, timedelta
+from pymongo import MongoClient
 import logging
-import os
+from dotenv import load_dotenv
+import json
+import cv2
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
+# Load environment variables
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
-# Define global variables
-model = None
-model_loaded = False
-
-# Define your classes (verify these match your training classes)
-CANCER_TYPES = [
-    "Normal",
-    "Benign", 
-    "Malignant"
-]
-
-# Load the model using the correct MediaPipe format
+# MongoDB connection using environment variable
+MONGODB_URI = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
 try:
-    logger.info("Starting model loading process for MediaPipe model")
-    
-    # MediaPipe Model Maker saves models in SavedModel format in the export_dir
-    model_dir = os.path.join(os.getcwd(), "Model")
-    
-    # Check if the directory exists
-    if not os.path.exists(model_dir):
-        logger.error(f"Model directory not found: {model_dir}")
-        model_loaded = False
-    else:
-        # List the contents of the model directory
-        logger.info(f"Model directory contents: {os.listdir(model_dir)}")
-        
-        # Try to load the model as a SavedModel
-        try:
-            # MediaPipe models are saved as TFLite models or SavedModels
-            # First, check if there's a saved_model.pb file
-            saved_model_path = os.path.join(model_dir, "saved_model.pb")
-            if os.path.exists(saved_model_path) or os.path.exists(os.path.join(model_dir, "saved_model")):
-                # Load as SavedModel
-                model = tf.saved_model.load(model_dir)
-                logger.info("Model loaded as SavedModel")
-                
-                # For SavedModel format, we need to get the concrete function
-                infer = model.signatures["serving_default"]
-                logger.info(f"Model input: {list(infer.structured_input_signature[1].keys())}")
-                logger.info(f"Model output: {list(infer.structured_outputs.keys())}")
-                
-                # Test prediction
-                test_input = np.random.random((1, 224, 224, 3)).astype(np.float32)
-                input_tensor = tf.convert_to_tensor(test_input)
-                test_output = infer(**{list(infer.structured_input_signature[1].keys())[0]: input_tensor})
-                output_key = list(test_output.keys())[0]
-                logger.info(f"Test prediction: {test_output[output_key]}")
-                
-                model_loaded = True
-            
-            # If no SavedModel, check for TFLite model
-            elif any(f.endswith('.tflite') for f in os.listdir(model_dir)):
-                tflite_file = next(f for f in os.listdir(model_dir) if f.endswith('.tflite'))
-                tflite_path = os.path.join(model_dir, tflite_file)
-                logger.info(f"Found TFLite model: {tflite_path}")
-                
-                # Load TFLite model
-                interpreter = tf.lite.Interpreter(model_path=tflite_path)
-                interpreter.allocate_tensors()
-                
-                # Get input and output tensors
-                input_details = interpreter.get_input_details()
-                output_details = interpreter.get_output_details()
-                
-                logger.info(f"TFLite input details: {input_details}")
-                logger.info(f"TFLite output details: {output_details}")
-                
-                # Set model to the interpreter
-                model = interpreter
-                model_loaded = True
-                logger.info("Loaded model as TFLite interpreter")
-            
-            # Try loading from checkpoint as a last resort
-            elif os.path.exists(os.path.join(model_dir, "model-0020.index")):
-                logger.info("Attempting to load from checkpoint")
-                
-                # Create a fresh model with MobileNetV2 and a classification head
-                base_model = tf.keras.applications.MobileNetV2(
-                    input_shape=(224, 224, 3),
-                    include_top=False,
-                    weights=None
-                )
-                
-                # Add classification layers
-                x = base_model.output
-                x = tf.keras.layers.GlobalAveragePooling2D()(x)
-                x = tf.keras.layers.Dense(128, activation='relu')(x)
-                predictions = tf.keras.layers.Dense(len(CANCER_TYPES), activation='softmax')(x)
-                
-                model = tf.keras.Model(inputs=base_model.input, outputs=predictions)
-                
-                # Load the checkpoint
-                checkpoint_path = os.path.join(model_dir, "model-0020")
-                checkpoint = tf.train.Checkpoint(model=model)
-                status = checkpoint.restore(checkpoint_path)
-                status.expect_partial()
-                
-                # Test the model
-                test_input = np.random.random((1, 224, 224, 3))
-                test_output = model.predict(test_input)
-                logger.info(f"Test prediction from checkpoint: {test_output}")
-                
-                model_loaded = True
-                logger.info("Model loaded from checkpoint")
-            else:
-                logger.error("No suitable model format found in model directory")
-                model_loaded = False
-                
-            # Check if predictions are uniform
-            is_uniform = False
-            if model_loaded:
-                if isinstance(model, tf.lite.Interpreter):
-                    # For TFLite model
-                    test_input = np.random.random((1, 224, 224, 3)).astype(np.float32)
-                    interpreter = model
-                    input_details = interpreter.get_input_details()
-                    output_details = interpreter.get_output_details()
-                    interpreter.set_tensor(input_details[0]['index'], test_input)
-                    interpreter.invoke()
-                    test_output = interpreter.get_tensor(output_details[0]['index'])
-                    
-                elif hasattr(model, 'signatures'):
-                    # For SavedModel with signatures
-                    test_input = np.random.random((1, 224, 224, 3)).astype(np.float32)
-                    input_tensor = tf.convert_to_tensor(test_input)
-                    infer = model.signatures["serving_default"]
-                    input_key = list(infer.structured_input_signature[1].keys())[0]
-                    test_output_dict = infer(**{input_key: input_tensor})
-                    output_key = list(test_output_dict.keys())[0]
-                    test_output = test_output_dict[output_key].numpy()
-                else:
-                    # For regular Keras model
-                    test_input = np.random.random((1, 224, 224, 3))
-                    test_output = model.predict(test_input)
-                
-                logger.info(f"Test output shape: {test_output.shape}")
-                logger.info(f"Test output values: {test_output}")
-                
-                # Check if all values are the same
-                is_uniform = np.allclose(test_output[0], test_output[0][0], rtol=1e-5)
-                logger.info(f"Uniform predictions: {is_uniform}")
-            
-            if is_uniform:
-                logger.warning("⚠️ Model is returning uniform predictions. Check if weights were correctly loaded.")
-            
-        except Exception as e:
-            logger.error(f"Error loading model: {str(e)}")
-            traceback.print_exc()
-            model_loaded = False
-            
+    client = MongoClient(MONGODB_URI)
+    # Test the connection
+    client.server_info()
+    logger.info("Successfully connected to MongoDB")
 except Exception as e:
-    model_loaded = False
-    logger.error(f"Error during model initialization: {str(e)}")
-    traceback.print_exc()
+    logger.error(f"Failed to connect to MongoDB: {str(e)}")
+    raise
+
+db = client['lung_cancer_db']
+records_collection = db['patient_records']
+scans_collection = db['scans']
+patients_collection = db['patients']
+
+# Configure upload folder
+UPLOAD_FOLDER = 'uploads'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# Load the TFLite model
+model_path = os.path.join('Model', 'model.tflite')
+try:
+    # Load the TFLite model
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    logger.info("Successfully loaded TFLite model")
+except Exception as e:
+    logger.error(f"Failed to load TFLite model: {str(e)}")
+    raise
+
+# Get input and output tensors
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Log model details
+logger.info(f"Model Input Details: {input_details}")
+logger.info(f"Model Output Details: {output_details}")
 
 def preprocess_image(image):
+    """Preprocess the image for model input exactly as done during training"""
     try:
-        logger.info(f"Original image size: {image.size}, mode: {image.mode}")
-        
-        # Convert to RGB if needed
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-            logger.info("Converted image to RGB mode")
-        
-        # Resize to 224x224 (MobileNetV2 input size)
-        image = image.resize((224, 224))
-        logger.info("Resized image to 224x224")
-        
-        # Convert to numpy array
+        # Convert PIL Image to OpenCV format (RGB to BGR)
         img_array = np.array(image)
-        logger.info(f"Image array shape: {img_array.shape}")
+        img_array = img_array[:, :, ::-1]  # RGB to BGR
         
-        # MobileNetV2 preprocessing - scale to [-1, 1]
-        img_array = img_array.astype(np.float32)
+        # Resize to 224x224 as done in training
+        img_array = cv2.resize(img_array, (224, 224))
         
-        # MediaPipe Model Maker uses [-1,1] normalization for MobileNetV2
-        img_array = (img_array - 127.5) / 127.5
+        # Convert to float32 and normalize to [0, 1]
+        img_array = img_array.astype('float32') / 255.0
         
         # Add batch dimension
         img_array = np.expand_dims(img_array, axis=0)
-        logger.info(f"Final preprocessed array shape: {img_array.shape}")
+        
+        logger.info(f"Preprocessed image shape: {img_array.shape}")
+        logger.info(f"Value range: min={np.min(img_array)}, max={np.max(img_array)}")
         
         return img_array
+        
     except Exception as e:
-        logger.error(f"Error in image preprocessing: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"Error preprocessing image: {str(e)}")
         raise
 
-@app.route("/", methods=["GET"])
-def home():
-    return "Lung Cancer Classification API is running! Use /predict to send an image."
+def predict_image(image):
+    """Make prediction using the TFLite model"""
+    try:
+        # Convert to RGB if not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Preprocess the image
+        processed_image = preprocess_image(image)
+        
+        # Set input tensor
+        interpreter.set_tensor(input_details[0]['index'], processed_image)
+        
+        # Run inference
+        interpreter.invoke()
+        
+        # Get output tensor
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        
+        # Get probabilities for each class
+        probabilities = output_data[0]
+        logger.info(f"Raw probabilities: {probabilities}")
+        
+        # Get predicted class
+        predicted_class_idx = np.argmax(probabilities)
+        class_names = ['Normal', 'Benign', 'Malignant']
+        predicted_class = class_names[predicted_class_idx]
+        
+        # Create probabilities dictionary
+        prob_dict = {
+            'normal': float(probabilities[0]),
+            'benign': float(probabilities[1]),
+            'malignant': float(probabilities[2])
+        }
+        
+        logger.info(f"Prediction result: {predicted_class} with probabilities {prob_dict}")
+        
+        return {
+            'predicted_class': predicted_class,
+            'confidence': float(probabilities[predicted_class_idx]),
+            'probabilities': prob_dict
+        }
+        
+    except Exception as e:
+        logger.error(f"Error making prediction: {str(e)}")
+        raise
 
-@app.route("/predict", methods=["POST"])
+@app.route('/predict', methods=['POST'])
 def predict():
     try:
-        logger.info("Received prediction request")
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
         
-        # Check if model is loaded
-        if not model_loaded or model is None:
-            logger.error("Model not loaded, cannot make predictions")
-            return jsonify({"error": "Model not available. Please check server logs."}), 503
-        
-        if "file" not in request.files:
-            logger.error("No file part in the request")
-            return jsonify({"error": "No file uploaded"}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
 
-        file = request.files["file"]
-        logger.info(f"Received file: {file.filename}")
+        # Read the image file
+        try:
+            # Read the file into memory
+            file_bytes = file.read()
+            file_stream = io.BytesIO(file_bytes)
+            
+            # Open and verify the image
+            image = Image.open(file_stream)
+            image.verify()  # Verify it's a valid image
+            
+            # Reopen because verify() closes the file
+            file_stream.seek(0)
+            image = Image.open(file_stream)
+            
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+                
+            logger.info(f"Image opened successfully. Size: {image.size}, Mode: {image.mode}")
+            
+        except Exception as e:
+            logger.error(f"Failed to open image: {str(e)}")
+            return jsonify({'error': f'Invalid image file: {str(e)}'}), 400
+
+        # Get prediction
+        try:
+            prediction = predict_image(image)
+            logger.info(f"Prediction successful: {prediction}")
+            return jsonify(prediction)
+        except Exception as e:
+            logger.error(f"Prediction failed: {str(e)}")
+            return jsonify({'error': f'Failed to process image: {str(e)}'}), 500
+
+    except Exception as e:
+        app.logger.error(f"Error during prediction: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/history', methods=['GET'])
+def get_history():
+    try:
+        # Get all records from MongoDB
+        records = list(records_collection.find({}, {'_id': 0}))
         
-        # Open and preprocess the image
-        image_bytes = file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        img_array = preprocess_image(image)
+        # Convert ObjectId to string for JSON serialization
+        for record in records:
+            record['timestamp'] = record['timestamp']
         
-        # Make prediction based on model type
-        if isinstance(model, tf.lite.Interpreter):
-            # TFLite model prediction
-            interpreter = model
-            input_details = interpreter.get_input_details()
-            output_details = interpreter.get_output_details()
-            
-            # Set input tensor
-            interpreter.set_tensor(input_details[0]['index'], img_array)
-            
-            # Run inference
-            interpreter.invoke()
-            
-            # Get output predictions
-            predictions = interpreter.get_tensor(output_details[0]['index'])
-            logger.info(f"TFLite prediction shape: {predictions.shape}")
-            logger.info(f"Raw predictions: {predictions}")
-            
-        elif hasattr(model, 'signatures'):
-            # SavedModel with signatures
-            infer = model.signatures["serving_default"]
-            input_key = list(infer.structured_input_signature[1].keys())[0]
-            
-            # Convert to tensor
-            input_tensor = tf.convert_to_tensor(img_array)
-            
-            # Run inference
-            output_dict = infer(**{input_key: input_tensor})
-            
-            # Get output from dictionary
-            output_key = list(output_dict.keys())[0]
-            predictions = output_dict[output_key].numpy()
-            logger.info(f"SavedModel prediction shape: {predictions.shape}")
-            logger.info(f"Raw predictions: {predictions}")
-            
-        else:
-            # Standard Keras model
-            predictions = model.predict(img_array)
-            logger.info(f"Keras prediction shape: {predictions.shape}")
-            logger.info(f"Raw predictions: {predictions}")
+        return jsonify(records)
+    
+    except Exception as e:
+        logger.error(f"Error in history endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/history/<patient_id>', methods=['GET'])
+def get_patient_history(patient_id):
+    try:
+        # Get records for specific patient
+        records = list(records_collection.find(
+            {'patientId': patient_id},
+            {'_id': 0}
+        ))
         
-        # Process results - assume predictions shape is [1, num_classes]
-        class_probs = predictions[0]
-        predicted_class_index = np.argmax(class_probs)
+        # Convert ObjectId to string for JSON serialization
+        for record in records:
+            record['timestamp'] = record['timestamp']
         
-        # Get the class name
-        if predicted_class_index < len(CANCER_TYPES):
-            predicted_class = CANCER_TYPES[predicted_class_index]
-        else:
-            predicted_class = f"Unknown Class {predicted_class_index}"
+        return jsonify(records)
+    
+    except Exception as e:
+        logger.error(f"Error in patient history endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    try:
+        # Get total number of scans
+        total_scans = records_collection.count_documents({})
         
-        # Create results dictionary
-        results = {
-            "predicted_class": predicted_class,
-            "confidence": float(class_probs[predicted_class_index]),
-            "class_probabilities": {
-                CANCER_TYPES[i] if i < len(CANCER_TYPES) else f"Class {i}": float(class_probs[i])
-                for i in range(len(class_probs))
+        # Get number of detected cases (malignant)
+        detected_cases = records_collection.count_documents({"diagnosis": "Malignant"})
+        
+        # Get number of active patients (patients with scans in the last 30 days)
+        thirty_days_ago = datetime.now().isoformat()[:10]  # Get date part only
+        active_patients = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": thirty_days_ago}
+        }))
+        
+        # Calculate success rate (based on model confidence > 90%)
+        high_confidence_scans = records_collection.count_documents({"confidence": {"$gt": 0.9}})
+        success_rate = (high_confidence_scans / total_scans * 100) if total_scans > 0 else 0
+        
+        # Calculate trends
+        prev_thirty_days = (datetime.now() - timedelta(days=30)).isoformat()[:10]
+        prev_scans = records_collection.count_documents({
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago}
+        })
+        current_scans = records_collection.count_documents({
+            "timestamp": {"$gte": thirty_days_ago}
+        })
+        
+        scan_trend = calculate_trend(prev_scans, current_scans)
+        
+        prev_cases = records_collection.count_documents({
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago},
+            "diagnosis": "Malignant"
+        })
+        current_cases = records_collection.count_documents({
+            "timestamp": {"$gte": thirty_days_ago},
+            "diagnosis": "Malignant"
+        })
+        
+        cases_trend = calculate_trend(prev_cases, current_cases)
+        
+        prev_active = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": prev_thirty_days, "$lt": thirty_days_ago}
+        }))
+        current_active = len(records_collection.distinct("patientId", {
+            "timestamp": {"$gte": thirty_days_ago}
+        }))
+        
+        patients_trend = calculate_trend(prev_active, current_active)
+        
+        stats = {
+            "total_scans": {
+                "value": total_scans,
+                "trend": scan_trend
+            },
+            "detected_cases": {
+                "value": detected_cases,
+                "trend": cases_trend
+            },
+            "success_rate": {
+                "value": round(success_rate, 1)
+            },
+            "active_patients": {
+                "value": current_active,
+                "trend": patients_trend
             }
         }
         
-        # Add cancer probability calculation (sum of Benign and Malignant)
-        if len(CANCER_TYPES) == 3:  # Normal, Benign, Malignant
-            results["cancer_probability"] = float(class_probs[1] + class_probs[2])  # Sum of Benign + Malignant
-            results["malignant_probability"] = float(class_probs[2])  # Just Malignant
-        
-        logger.info(f"Classification results: {results}")
-        return jsonify(results)
+        logger.info(f"Stats calculated: {json.dumps(stats)}")
+        return jsonify(stats)
         
     except Exception as e:
-        logger.error(f"Error in prediction: {str(e)}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error calculating stats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route("/status", methods=["GET"])
-def status():
-    """Endpoint to check model and server status"""
-    model_type = "Unknown"
-    if model_loaded:
-        if isinstance(model, tf.lite.Interpreter):
-            model_type = "TFLite Model"
-        elif hasattr(model, 'signatures'):
-            model_type = "SavedModel with signatures"
-        else:
-            model_type = "Standard Keras Model"
+def calculate_trend(prev_value, current_value):
+    """Calculate percentage change between two values"""
+    if prev_value == 0:
+        return {
+            "value": 0,
+            "isPositive": True
+        }
+    
+    change = ((current_value - prev_value) / prev_value) * 100
+    return {
+        "value": round(abs(change), 1),
+        "isPositive": change >= 0
+    }
+
+@app.route('/save-record', methods=['POST'])
+def save_record():
+    try:
+        logger.info("Received save record request")
+        logger.info(f"Files in request: {list(request.files.keys())}")
+        logger.info(f"Form data in request: {list(request.form.keys())}")
+        
+        # Check for required data
+        if 'file' not in request.files:
+            logger.error("No file in save request")
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            logger.error("Empty filename")
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
             
-    return jsonify({
-        "server": "running",
-        "model_loaded": model_loaded,
-        "model_type": model_type,
-        "classes": CANCER_TYPES,
-        "tensorflow_version": tf.__version__,
-        "model_directory": os.path.join(os.getcwd(), "Model"),
-        "model_files": os.listdir(os.path.join(os.getcwd(), "Model")) if os.path.exists(os.path.join(os.getcwd(), "Model")) else []
-    })
+        patient_id = request.form.get('patientId')
+        if not patient_id:
+            logger.error("No patient ID provided")
+            return jsonify({'success': False, 'error': 'No patient ID provided'}), 400
+            
+        prediction_data = request.form.get('prediction')
+        if not prediction_data:
+            logger.error("No prediction data provided")
+            return jsonify({'success': False, 'error': 'No prediction data provided'}), 400
+            
+        try:
+            prediction = json.loads(prediction_data)
+            logger.info(f"Parsed prediction data: {prediction}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid prediction data format: {e}")
+            return jsonify({'success': False, 'error': 'Invalid prediction data format'}), 400
 
-if __name__ == "__main__":
-    logger.info("Starting Flask server")
+        # Save the image file
+        try:
+            if not os.path.exists('uploads'):
+                os.makedirs('uploads')
+                
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{patient_id}_{timestamp}.jpg"
+            filepath = os.path.join('uploads', filename)
+            file.save(filepath)
+            logger.info(f"Image saved to: {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save image file: {e}")
+            return jsonify({'success': False, 'error': 'Failed to save image file'}), 500
+        
+        # Create database record
+        try:
+            record = {
+                'patientId': patient_id,
+                'timestamp': datetime.now(),
+                'imagePath': filepath,
+                'diagnosis': prediction['predicted_class'],
+                'confidence': prediction['confidence'],
+                'probabilities': prediction['probabilities']
+            }
+            
+            # Save to MongoDB
+            result = db.scans.insert_one(record)
+            logger.info(f"Record saved to MongoDB with ID: {result.inserted_id}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Record saved successfully',
+                'recordId': str(result.inserted_id)
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to save to MongoDB: {e}")
+            # Try to delete the saved image if database save fails
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+            return jsonify({'success': False, 'error': 'Failed to save record to database'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error in save_record endpoint: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

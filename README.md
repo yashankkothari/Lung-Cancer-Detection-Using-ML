@@ -1,6 +1,6 @@
-# Lung Cancer Detection Using Machine Learning (React Native + Expo)
+# OncoLytix- A Lung Cancer Detection Application Using Machine Learning (React Native + Expo)
 
-This project is a **React Native mobile application** using **Expo** to provide an interface for predicting lung cancer chances based on CT scan images. A **Flask API** runs in the backend to process the images using a **machine learning model**.
+Oncolytix is a **React Native mobile application** using **Expo** to provide an interface for predicting lung cancer chances based on CT scan images. A **Flask API** runs in the backend to process the images using a **machine learning model**.
 
 ## 🚀 Features
 - Upload **CT scan images** via mobile app

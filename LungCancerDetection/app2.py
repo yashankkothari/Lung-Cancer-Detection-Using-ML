@@ -1,11 +1,11 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from tensorflow.keras.models import load_model
 import numpy as np
 import io
 from PIL import Image
 import traceback
 import logging
+import tensorflow as tf
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -14,19 +14,37 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Load the trained model
+# Load the TFLite model
 try:
-    model = load_model("Lung_Model.h5")
-    logger.info("Model loaded successfully")
+    interpreter = tf.lite.Interpreter(model_path="Model/model.tflite")
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    logger.info("TFLite model loaded successfully")
+    logger.info(f"Input details: {input_details}")
+    logger.info(f"Output details: {output_details}")
     
-    # Print model input/output shapes for debugging
-    model_summary = []
-    for layer in model.layers:
-        model_summary.append(f"Layer: {layer.name}, Input shape: {layer.input_shape}, Output shape: {layer.output_shape}")
-    logger.info("Model architecture:")
-    for summary in model_summary:
-        logger.info(summary)
-        
+    # Log model input shape requirements
+    input_shape = input_details[0]['shape']
+    logger.info(f"Model expects input shape: {input_shape}")
+    
+    # Log model output shape
+    output_shape = output_details[0]['shape']
+    logger.info(f"Model output shape: {output_shape}")
+    
+    # Log input data type
+    input_dtype = input_details[0]['dtype']
+    logger.info(f"Model expects input dtype: {input_dtype}")
+    
+    # Log output data type
+    output_dtype = output_details[0]['dtype']
+    logger.info(f"Model output dtype: {output_dtype}")
+    
+    # Log quantization details if any
+    if 'quantization' in input_details[0]:
+        logger.info(f"Input quantization: {input_details[0]['quantization']}")
+    if 'quantization' in output_details[0]:
+        logger.info(f"Output quantization: {output_details[0]['quantization']}")
 except Exception as e:
     logger.error(f"Error loading model: {str(e)}")
     traceback.print_exc()
@@ -44,7 +62,7 @@ def preprocess_image(image):
         logger.info(f"Resized image to 224x224")
         
         # Convert to numpy array and normalize pixel values
-        img_array = np.array(image) / 255.0
+        img_array = np.array(image, dtype=np.float32) / 255.0
         logger.info(f"Initial array shape: {img_array.shape}")
         
         # Make sure the array has shape (224, 224, 3)
@@ -57,6 +75,9 @@ def preprocess_image(image):
         
         # Log the shape to verify it matches what the model expects
         logger.info(f"Preprocessed image shape: {img_array.shape}")
+        
+        # Log value ranges
+        logger.info(f"Input value range: min={np.min(img_array)}, max={np.max(img_array)}")
         
         return img_array
     except Exception as e:
@@ -87,25 +108,55 @@ def predict():
         image = Image.open(io.BytesIO(image_bytes))
         logger.info(f"Image opened successfully: {image.size}, mode: {image.mode}")
 
-        # Preprocess the image and make a prediction
+        # Preprocess the image
         img_array = preprocess_image(image)
         logger.info("Image preprocessed successfully")
         
-        # Make prediction
-        prediction = model.predict(img_array)
-        logger.info(f"Raw prediction: {prediction}")
+        # Set input tensor
+        interpreter.set_tensor(input_details[0]['index'], img_array)
         
-        # Handle different prediction shapes
-        if isinstance(prediction, list):
-            probability = float(prediction[0][0])
-        elif len(prediction.shape) == 2:
-            probability = float(prediction[0][0])
-        else:
-            probability = float(prediction[0])
-            
-        logger.info(f"Final probability: {probability}")
+        # Make prediction
+        interpreter.invoke()
+        
+        # Get prediction result
+        prediction = interpreter.get_tensor(output_details[0]['index'])
+        logger.info(f"Raw prediction: {prediction}")
+        logger.info(f"Prediction shape: {prediction.shape}")
+        logger.info(f"Prediction dtype: {prediction.dtype}")
+        
+        # Get probabilities for each class
+        probabilities = prediction[0]  # Shape should be (3,) for three classes
+        logger.info(f"Class probabilities: {probabilities}")
+        
+        # Get the predicted class index
+        predicted_class = np.argmax(probabilities)
+        
+        # Map class indices to labels - matching the training data folder structure
+        class_labels = ['Normal', 'Malignant', 'Benign']  # Updated order to match training data
+        predicted_label = class_labels[predicted_class]
+        
+        # Get confidence score
+        confidence = float(probabilities[predicted_class])
+        
+        # Log detailed prediction information
+        logger.info("Detailed prediction information:")
+        logger.info(f"Raw probabilities: {probabilities}")
+        logger.info(f"Predicted class index: {predicted_class}")
+        logger.info(f"Predicted class: {predicted_label}")
+        logger.info(f"Confidence: {confidence}")
+        logger.info(f"All class probabilities:")
+        for i, (label, prob) in enumerate(zip(class_labels, probabilities)):
+            logger.info(f"{label}: {float(prob)}")
 
-        return jsonify({"lung_cancer_probability": probability})
+        return jsonify({
+            "predicted_class": predicted_label,
+            "confidence": confidence,
+            "probabilities": {
+                "normal": float(probabilities[0]),
+                "malignant": float(probabilities[1]),
+                "benign": float(probabilities[2])
+            }
+        })
     
     except Exception as e:
         logger.error(f"Error in prediction: {str(e)}")
