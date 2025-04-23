@@ -1,37 +1,85 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
+import { API_URL } from '../constants/api';
+import { useRouter } from 'expo-router';
+import { AuthContext } from './_layout';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function Dashboard() {
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
+  const { isAuthenticated } = useContext(AuthContext);
+  const router = useRouter();
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/login');
+      return;
+    }
+    
     fetchHistory();
     fetchStats();
-  }, []);
+  }, [isAuthenticated]);
 
   const fetchHistory = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/history');
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      const response = await axios.get(`${API_URL}/history`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       setHistory(response.data);
     } catch (error) {
       console.error('Error fetching history:', error);
+      
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please log in again.');
+        router.replace('/login');
+      }
     }
   };
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/stats');
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      const response = await axios.get(`${API_URL}/stats`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);
+      
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please log in again.');
+        router.replace('/login');
+      }
     }
   };
 
   const handleScan = async () => {
     try {
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        Alert.alert('Authentication Error', 'You must be logged in to use this feature.');
+        router.replace('/login');
+        return;
+      }
+      
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -48,9 +96,10 @@ export default function Dashboard() {
         });
         formData.append('patientId', 'default-patient'); // You might want to make this dynamic
 
-        const response = await axios.post('http://localhost:5000/predict', formData, {
+        const response = await axios.post(`${API_URL}/predict`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
+            'Authorization': `Bearer ${token}`
           },
         });
 
@@ -60,6 +109,11 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('Error during scan:', error);
+      
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please log in again.');
+        router.replace('/login');
+      }
     }
   };
 

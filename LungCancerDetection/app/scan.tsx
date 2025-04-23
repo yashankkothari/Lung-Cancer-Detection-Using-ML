@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useContext, useEffect } from "react";
 import { 
   View, 
   TouchableOpacity, 
@@ -18,10 +18,13 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import axios from "axios";
 import { LinearGradient } from "expo-linear-gradient";
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
 import { useRouter } from "expo-router";
 import Footer from '../components/Footer';
+import { AuthContext } from './_layout';
+import { API_URL } from '../constants/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define interfaces based on the actual response formats
 interface WebDocumentResult {
@@ -61,9 +64,9 @@ export default function ScanScreen() {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [patientId, setPatientId] = useState("");
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const [patientName, setPatientName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<{ blob: Blob; fileType: string } | null>(null);
-  const patientIdInputRef = React.useRef<TextInput>(null);
   const [prediction, setPrediction] = useState<{
     predicted_class: string;
     confidence: number;
@@ -73,27 +76,58 @@ export default function ScanScreen() {
       benign: number;
     };
   } | null>(null);
-  const [patientIdError, setPatientIdError] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const router = useRouter();
-
-  const validateAndPickImage = () => {
-    if (!patientId.trim()) {
-      setPatientIdError(true);
-      Alert.alert(
-        "Missing Patient ID",
-        "Please enter a patient ID before selecting an image.",
-        [{ text: "OK" }]
-      );
-      patientIdInputRef.current?.focus();
-      return false;
+  const { isAuthenticated } = useContext(AuthContext);
+  
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/login');
     }
-    setPatientIdError(false);
-    return true;
-  };
+  }, [isAuthenticated, router]);
+
+  // Load selected patient information
+  useEffect(() => {
+    async function loadPatientInfo() {
+      try {
+        const storedPatientId = await AsyncStorage.getItem('selectedPatientId');
+        const storedPatientName = await AsyncStorage.getItem('selectedPatientName');
+        
+        if (!storedPatientId) {
+          // If no patient is selected, go back to patient selection
+          Alert.alert(
+            "No Patient Selected",
+            "Please select a patient before proceeding.",
+            [{ text: "OK", onPress: () => router.replace('/select-patient') }]
+          );
+          return;
+        }
+        
+        setPatientId(storedPatientId);
+        setPatientName(storedPatientName);
+      } catch (error) {
+        console.error('Error loading patient info:', error);
+        Alert.alert(
+          "Error",
+          "Failed to load patient information. Please try again.",
+          [{ text: "OK", onPress: () => router.replace('/select-patient') }]
+        );
+      }
+    }
+    
+    loadPatientInfo();
+  }, [router]);
 
   const pickImage = async () => {
-    if (!validateAndPickImage()) return;
+    if (!patientId) {
+      Alert.alert(
+        "No Patient Selected",
+        "Please select a patient before uploading a scan.",
+        [{ text: "OK", onPress: () => router.replace('/select-patient') }]
+      );
+      return;
+    }
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -127,6 +161,14 @@ export default function ScanScreen() {
     try {
       setIsLoading(true);
 
+      // Get auth token
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        Alert.alert("Authentication Error", "You must be logged in to use this feature.");
+        router.replace('/login');
+        return;
+      }
+
       // Create form data
       const formData = new FormData();
       
@@ -147,10 +189,11 @@ export default function ScanScreen() {
       });
 
       // Make the request for prediction only
-      const response = await axios.post('http://localhost:5000/predict', formData, {
+      const response = await axios.post(`${API_URL}/predict`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         transformRequest: (data) => {
           return data;
@@ -171,7 +214,10 @@ export default function ScanScreen() {
       console.error('Error details:', error.response?.data);
       
       let errorMessage = 'Failed to upload image. ';
-      if (error.response?.status === 400) {
+      if (error.response?.status === 401) {
+        errorMessage = 'Your session has expired. Please log in again.';
+        router.replace('/login');
+      } else if (error.response?.status === 400) {
         errorMessage += error.response.data.error || 'Please ensure the image is a valid CT scan.';
       } else if (error.response?.status === 500) {
         errorMessage += error.response.data.error || 'Server error occurred.';
@@ -192,45 +238,77 @@ export default function ScanScreen() {
     if (!selectedFile || !prediction || !patientId) {
       Alert.alert(
         "Missing Information",
-        "Please ensure you have selected an image, processed it, and entered a patient ID.",
+        "Please ensure you have selected an image and processed it.",
         [{ text: "OK" }]
       );
       return;
     }
 
+    // Get auth token
+    const token = await AsyncStorage.getItem('authToken');
+    if (!token) {
+      Alert.alert("Authentication Error", "You must be logged in to save records.");
+      router.replace('/login');
+      return;
+    }
+
     try {
       setIsSaving(true);
-
+      
+      // Create form data
       const formData = new FormData();
-      formData.append('file', selectedFile.blob, `scan.${selectedFile.fileType}`);
+      
+      // Append the file with proper filename
+      const filename = `${patientId}_${Date.now()}.${selectedFile.fileType}`;
+      formData.append('file', selectedFile.blob, filename);
+      
+      // Append patient ID
       formData.append('patientId', patientId);
+      
+      // Append prediction data
       formData.append('prediction', JSON.stringify(prediction));
-
-      const response = await axios.post('http://localhost:5000/save-record', formData, {
+      
+      // Send to server
+      const response = await axios.post(`${API_URL}/save-record`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
+        transformRequest: (data) => {
+          return data;
+        },
+        timeout: 30000,
       });
 
-      // Show the custom success popup
-      setShowSuccessPopup(true);
-      
-      // Keep the isSaving state true until user dismisses the popup
+      console.log('Save response:', response.data);
+
+      if (response.data && response.data.success) {
+        setShowSuccessPopup(true);
+      } else {
+        throw new Error(response.data?.message || 'Failed to save record');
+      }
       
     } catch (error: any) {
-      setIsSaving(false);
       console.error('Save error:', error);
       
-      Alert.alert(
-        "Error Saving Record", 
-        "Failed to save record to database. Please try again.",
-        [{ text: "OK" }]
-      );
+      let errorMessage = 'Failed to save record. ';
+      if (error.response?.status === 401) {
+        errorMessage = 'Your session has expired. Please log in again.';
+        router.replace('/login');
+      } else {
+        errorMessage += error.message || 'Please try again.';
+      }
+      
+      Alert.alert("Error", errorMessage);
+    } finally {
+      setIsSaving(false);
     }
   };
 
   // Function to handle popup actions
-  const handlePopupAction = (action: 'history' | 'new' | 'close') => {
+  const handlePopupAction = (action: 'history' | 'new' | 'close' | 'report') => {
+    console.log("Popup action triggered:", action);
     setShowSuccessPopup(false);
     setIsSaving(false);
     
@@ -243,7 +321,55 @@ export default function ScanScreen() {
       setImage(null);
       setPrediction(null);
       setSelectedFile(null);
-      setPatientId("");
+      setPatientId(null);
+    } else if (action === 'report') {
+      // Store data in AsyncStorage for report page to access
+      console.log("Preparing report data...");
+      const reportData = {
+        patientId: patientId || '',
+        patientName: patientName || '',
+        diagnosis: prediction?.predicted_class || '',
+        confidence: prediction ? (prediction.confidence * 100).toFixed(1) : '',
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log("Report data:", reportData);
+      
+      // First try directly opening the report screen
+      try {
+        Alert.alert(
+          "Creating Report",
+          "Opening report editor...",
+          [{ text: "OK" }]
+        );
+        
+        // Store data and redirect with timeout to ensure data is saved
+        AsyncStorage.setItem('reportData', JSON.stringify(reportData))
+          .then(() => {
+            setTimeout(() => {
+              router.push('/patients');
+              
+              // After returning to patients screen, show message about report data
+              setTimeout(() => {
+                Alert.alert(
+                  "Report Data Saved",
+                  "Report data has been saved. Access it from report-editor.tsx or view patient history.",
+                  [{ text: "OK" }]
+                );
+              }, 1000);
+            }, 500);
+          })
+          .catch(err => {
+            console.error('Failed to save report data:', err);
+            Alert.alert('Error', 'Failed to prepare report. Please try again.');
+          });
+      } catch (e) {
+        console.error("Navigation error:", e);
+        Alert.alert(
+          "Navigation Error", 
+          "Could not navigate to report editor: " + String(e)
+        );
+      }
     }
   };
 
@@ -258,32 +384,18 @@ export default function ScanScreen() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Patient Information</Text>
               
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  Patient ID <Text style={styles.requiredStar}>*</Text>
-                </Text>
-                <TextInput
-                  ref={patientIdInputRef}
-                  style={[
-                    styles.input,
-                    patientIdError && styles.inputError
-                  ]}
-                  value={patientId}
-                  onChangeText={(text) => {
-                    setPatientId(text);
-                    if (text.trim()) {
-                      setPatientIdError(false);
-                    }
-                  }}
-                  placeholder="Enter patient ID"
-                  placeholderTextColor={Colors.text.muted}
-                />
-                {patientIdError && (
-                  <Text style={styles.errorText}>
-                    Patient ID is required
-                  </Text>
-                )}
-              </View>
+              {patientId && (
+                <View style={styles.patientInfoDisplay}>
+                  <View style={styles.patientInfoRow}>
+                    <Text style={styles.patientInfoLabel}>Patient:</Text>
+                    <Text style={styles.patientInfoValue}>{patientName || 'Unknown'}</Text>
+                  </View>
+                  <View style={styles.patientInfoRow}>
+                    <Text style={styles.patientInfoLabel}>ID:</Text>
+                    <Text style={styles.patientInfoValue}>{patientId}</Text>
+                  </View>
+                </View>
+              )}
 
               <View style={styles.content}>
                 <Text style={styles.title}>Upload CT Scan Image</Text>
@@ -296,7 +408,7 @@ export default function ScanScreen() {
                     style={[
                       styles.uploadArea, 
                       isDragging && styles.uploadAreaActive,
-                      patientIdError && styles.uploadAreaDisabled
+                      patientId && styles.uploadAreaDisabled
                     ]}
                     onPress={pickImage}
                   >
@@ -472,14 +584,47 @@ export default function ScanScreen() {
                   <View style={styles.popupActions}>
                     <TouchableOpacity
                       style={[styles.popupButton, styles.popupButtonPrimary]}
+                      onPress={() => {
+                        setShowSuccessPopup(false);
+                        
+                        // Store report data
+                        const reportData = {
+                          patientId: patientId || '',
+                          patientName: patientName || '',
+                          diagnosis: prediction?.predicted_class || '',
+                          confidence: prediction ? (prediction.confidence * 100).toFixed(1) : '',
+                          timestamp: new Date().toISOString()
+                        };
+                        
+                        AsyncStorage.setItem('reportData', JSON.stringify(reportData))
+                          .then(() => {
+                            // Go directly to report-editor
+                            router.push('/report-editor');
+                          })
+                          .catch(err => {
+                            console.error('Failed to save report data:', err);
+                            Alert.alert('Error', 'Failed to prepare report. Please try again.');
+                          });
+                      }}
+                    >
+                      <MaterialCommunityIcons
+                        name="file-document-outline"
+                        size={20}
+                        color={Colors.background}
+                      />
+                      <Text style={styles.popupButtonTextPrimary}>Make Report</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={[styles.popupButton, styles.popupButtonSecondary]}
                       onPress={() => handlePopupAction('history')}
                     >
                       <MaterialCommunityIcons
                         name="history"
                         size={20}
-                        color={Colors.background}
+                        color={Colors.accent.blue}
                       />
-                      <Text style={styles.popupButtonTextPrimary}>View History</Text>
+                      <Text style={styles.popupButtonTextSecondary}>View History</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity
@@ -554,22 +699,22 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: "center",
   },
-  inputContainer: {
+  patientInfoDisplay: {
     marginBottom: 20,
   },
-  inputLabel: {
-    fontSize: 16,
-    color: Colors.text.primary,
-    marginBottom: 8,
+  patientInfoRow: {
+    flexDirection: 'row',
+    marginBottom: 5,
   },
-  input: {
-    backgroundColor: Colors.surface,
-    borderRadius: 10,
-    padding: 15,
-    color: Colors.text.primary,
+  patientInfoLabel: {
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: Colors.border.default,
+    color: Colors.text.primary,
+    width: 80,
+  },
+  patientInfoValue: {
+    fontSize: 16,
+    color: Colors.text.primary,
+    flex: 1,
   },
   content: {
     flex: 1,
@@ -756,20 +901,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
-  },
-  inputError: {
-    borderColor: Colors.status.error,
-    borderWidth: 2,
-  },
-  errorText: {
-    color: Colors.status.error,
-    fontSize: 14,
-    marginTop: 4,
-    marginLeft: 4,
-  },
-  requiredStar: {
-    color: Colors.status.error,
-    fontSize: 16,
   },
   processButton: {
     backgroundColor: Colors.accent.green,

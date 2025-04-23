@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Platform, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Platform, ScrollView, Image, Alert, RefreshControl } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import axios from 'axios';
-import { API_BASE_URL, ENDPOINTS } from '../constants/api';
+import { API_URL, API_ROUTES } from '../constants/api';
 import Footer from '../components/Footer';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AuthContext } from './_layout';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface PatientRecord {
   patientId: string;
@@ -36,6 +38,13 @@ export default function History() {
   const [searched, setSearched] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [analysis, setAnalysis] = useState<ProgressAnalysis | null>(null);
+  const { isAuthenticated } = useContext(AuthContext);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/login');
+    }
+  }, [isAuthenticated, router]);
 
   useEffect(() => {
     if (params.id) {
@@ -54,7 +63,22 @@ export default function History() {
     setSearched(true);
 
     try {
-      const response = await axios.get(`${API_BASE_URL}${ENDPOINTS.HISTORY}/${patientId.trim()}`);
+      const token = await AsyncStorage.getItem('authToken');
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+      
+      let url = `${API_URL}${API_ROUTES.HISTORY}`;
+      if (patientId.trim()) {
+        url = `${API_URL}${API_ROUTES.HISTORY}/${patientId.trim()}`;
+      }
+      
+      const response = await axios.get(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       setRecords(response.data);
       if (response.data.length === 0) {
         setError('No records found for this patient');
@@ -63,6 +87,11 @@ export default function History() {
       console.error('Error fetching patient history:', err);
       setError('Failed to fetch patient records');
       setRecords([]);
+      
+      if (axios.isAxiosError(err) && err.response?.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please log in again.');
+        router.replace('/login');
+      }
     } finally {
       setLoading(false);
     }

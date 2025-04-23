@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useContext } from 'react';
 import { 
   View, 
   Text, 
@@ -9,15 +9,34 @@ import {
   Dimensions,
   ImageBackground,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Footer from '../components/Footer';
+import { AuthContext } from './_layout';
 
 export default function LandingPage() {
   const scrollViewRef = useRef<ScrollView>(null);
+  const { isAuthenticated } = useContext(AuthContext);
+  const router = useRouter();
 
   const scrollToInfo = () => {
     scrollViewRef.current?.scrollTo({ y: Dimensions.get('window').height, animated: true });
+  };
+
+  const handleStartScan = () => {
+    if (isAuthenticated) {
+      router.push('/select-patient');
+    } else {
+      router.push('/login');
+    }
+  };
+
+  const handlePatientRecords = () => {
+    if (isAuthenticated) {
+      router.push('/history');
+    } else {
+      router.push('/login');
+    }
   };
 
   return (
@@ -46,17 +65,13 @@ export default function LandingPage() {
               </Text>
               
               <View style={styles.buttonContainer}>
-                <Link href="/scan" asChild>
-                  <TouchableOpacity style={styles.startButton}>
-                    <Text style={styles.buttonText}>Start Scan</Text>
-                  </TouchableOpacity>
-                </Link>
+                <TouchableOpacity style={styles.startButton} onPress={handleStartScan}>
+                  <Text style={styles.buttonText}>Start Scan</Text>
+                </TouchableOpacity>
 
-                <Link href="/history" asChild>
-                  <TouchableOpacity style={styles.recordsButton}>
-                    <Text style={styles.buttonText}>Check Patient Records</Text>
-                  </TouchableOpacity>
-                </Link>
+                <TouchableOpacity style={styles.recordsButton} onPress={handlePatientRecords}>
+                  <Text style={styles.buttonText}>Check Patient Records</Text>
+                </TouchableOpacity>
                 
                 <TouchableOpacity style={styles.learnButton} onPress={scrollToInfo}>
                   <Text style={styles.learnButtonText}>Learn More</Text>

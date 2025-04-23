@@ -1,9 +1,11 @@
-// API configuration
-export const API_BASE_URL = 'http://127.0.0.1:5000';
+// Export API URL constant
+export const API_URL = 'http://localhost:5000';
 
-// API endpoints
-export const ENDPOINTS = {
-  STATS: '/stats',
-  HISTORY: '/history',
+// Any other API related constants can go here
+export const API_ROUTES = {
+  LOGIN: '/login',
+  SIGNUP: '/signup',
   PREDICT: '/predict',
-} as const; 
+  HISTORY: '/history',
+  STATS: '/stats',
+}; 
