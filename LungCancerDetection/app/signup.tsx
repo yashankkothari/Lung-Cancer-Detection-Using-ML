@@ -25,7 +25,21 @@ export default function SignupScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [emailValid, setEmailValid] = useState(true);
+  const [passwordValid, setPasswordValid] = useState(true);
   const { signIn } = useContext(AuthContext);
+
+  // Validate email as user types
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    setEmailValid(text === '' || text.toLowerCase().endsWith('somaiya.edu'));
+  };
+
+  // Validate password as user types
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    setPasswordValid(text === '' || /\d/.test(text));
+  };
 
   const handleSignup = async () => {
     // Basic validation
@@ -36,6 +50,18 @@ export default function SignupScreen() {
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+
+    // Email domain validation
+    if (!email.toLowerCase().endsWith('somaiya.edu')) {
+      setError('Email must be a Somaiya institution email (ending with somaiya.edu)');
+      return;
+    }
+
+    // Password complexity validation
+    if (!/\d/.test(password)) {
+      setError('Password must contain at least one number');
       return;
     }
 
@@ -117,26 +143,44 @@ export default function SignupScreen() {
               <View style={styles.inputContainer}>
                 <Text style={styles.label}>Email</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    !emailValid && styles.inputError
+                  ]}
                   placeholder="Enter your email"
                   placeholderTextColor="rgba(255,255,255,0.5)"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={handleEmailChange}
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
+                <Text style={[
+                  styles.helperText, 
+                  !emailValid && styles.helperTextError
+                ]}>
+                  Must be a Somaiya institution email (ending with somaiya.edu)
+                </Text>
               </View>
 
               <View style={styles.inputContainer}>
                 <Text style={styles.label}>Password</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    !passwordValid && styles.inputError
+                  ]}
                   placeholder="Create a password"
                   placeholderTextColor="rgba(255,255,255,0.5)"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={handlePasswordChange}
                   secureTextEntry
                 />
+                <Text style={[
+                  styles.helperText,
+                  !passwordValid && styles.helperTextError
+                ]}>
+                  Password must contain at least one number
+                </Text>
               </View>
 
               <View style={styles.inputContainer}>
@@ -269,5 +313,16 @@ const styles = StyleSheet.create({
   loginLink: {
     color: Colors.accent.blue,
     fontWeight: '600',
+  },
+  helperText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    marginTop: 5,
+  },
+  inputError: {
+    borderColor: Colors.status.error,
+  },
+  helperTextError: {
+    color: Colors.status.error,
   },
 }); 
